@@ -54,11 +54,11 @@ namespace enabling_range_based_for_loops_for_custom_types {
     }
 
     // not really required for range-based loop
-    // dummy_array_iterator_type operator++(int) {
-    //   auto temp = *this;
-    //   ++*temp;
-    //   return temp;
-    // }
+    dummy_array_iterator_type operator++(int) {
+      auto temp = *this;
+      ++*temp;
+      return temp;
+    }
 
   private:
     std::size_t index_;
