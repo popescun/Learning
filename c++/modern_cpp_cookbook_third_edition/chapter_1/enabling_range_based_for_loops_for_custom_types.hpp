@@ -1,7 +1,11 @@
+//
+// Created by Nicolae Popescu on 03/07/2025.
+//
+
 #pragma once
 
-#include <stdexcept>
 #include <iostream>
+#include <stdexcept>
 
 namespace enabling_range_based_for_loops_for_custom_types {
   template<typename T, std::size_t const Size>
@@ -98,5 +102,3 @@ namespace enabling_range_based_for_loops_for_custom_types {
     }
   }
 }
-
-
