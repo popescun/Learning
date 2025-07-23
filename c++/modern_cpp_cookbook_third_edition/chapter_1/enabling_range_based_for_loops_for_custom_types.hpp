@@ -100,9 +100,6 @@ namespace enabling_range_based_for_loops_for_custom_types {
     arr.set_at(1, 2);
     arr.set_at(2, 3);
 
-    for(std::size_t i = 0; i < arr.get_size(); ++i) {
-      std::cout << arr.get_at(i) << std::endl;
-    }
     for(const auto& item : arr) {
       std::cout << item << std::endl;
     }
