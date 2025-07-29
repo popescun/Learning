@@ -8,6 +8,5 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 project(chapter_20)
 
 file(GLOB headers *.hpp)
-add_executable(${PROJECT_NAME} main.cpp ${headers}
-  geometric_primtives.hpp)
+add_executable(${PROJECT_NAME} main.cpp ${headers})
 #include_directories(${CMAKE_SOURCE_DIR}/include)

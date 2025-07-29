@@ -8,6 +8,13 @@
 #include <iostream>
 #include <sstream>
 
+/*
+ Good explanation why is more consistent to write `const` specifier after type:
+ this way, everything to the left of `const` is meant to be const.
+
+ http://www.mario-konrad.ch/blog/programming/cpp-style-const.html
+ */
+
 namespace geometric_primitives {
 struct Point {
   float x;
@@ -49,6 +56,22 @@ float aria_of_triangle(const Triangle t) {
                          V - volume (in 2D is an aria)
                          D - determinant
  */
+
+/* Compute where a point is opposite a line?
+
+ Given a line equation: y  = ax + b and a point p, compute if p lies
+ above, below, or on the line?
+ */
+
+enum class Relation {
+  Above,
+  Bellow,
+  Overlap
+};
+
+Relation point_and_line_relation() {
+  return Relation::Overlap;
+}
 
 inline void test() {
   auto triangle_aria = aria_of_triangle({0.0, 0.0}, {1.0, 0.0}, {0.0, 1.0});
