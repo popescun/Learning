@@ -96,7 +96,7 @@ namespace practice_range_based_custom_type {
   inline void test() {
     custom_array<int, 3> arr{10, 20, 30};
     arr.set_at(2, 40);
-//    custom_array<int, 3> arr1(1, 2, 3);
+    custom_array<int, 3> arr1(1, 2, 3);
 
     std::stringstream ss;
     for (const auto& element : arr) {
