@@ -35,7 +35,7 @@ namespace enabling_range_based_for_loops_for_custom_types {
     T data_[Size] = {};
   };
 
-  template<typename T, typename C, std::size_t const Size>
+  template<typename T, typename C>
   class dummy_array_iterator_type {
   public:
     dummy_array_iterator_type(C& collection, std::size_t const index)
@@ -64,11 +64,11 @@ namespace enabling_range_based_for_loops_for_custom_types {
 
   template<typename T, std::size_t const Size>
   using dummy_array_iterator =
-    dummy_array_iterator_type<T, dummy_array<T, Size>, Size>;
+    dummy_array_iterator_type<T, dummy_array<T, Size>>;
 
   template<typename T, std::size_t const Size>
   using dummy_array_const_iterator =
-    dummy_array_iterator_type<T, dummy_array<T, Size> const, Size>;
+    dummy_array_iterator_type<T, dummy_array<T, Size> const>;
 
   template<typename T, std::size_t const Size>
   dummy_array_iterator<T, Size> begin(dummy_array<T, Size>& collection) {
