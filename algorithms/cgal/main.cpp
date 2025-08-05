@@ -28,7 +28,8 @@ int main() {
   ss << "point is on: " << line.has_on(Point_2{1, 1}) << "\n";
   ss << "point is on: " << line.has_on(Point_2{0, 1}) << "\n";
   ss << "point is on: " << line.has_on(Point_2{1, 0}) << "\n";
-  ss << "point is on: " << line.has_on(Point_2{2, 2}) << "\n";
+  ss << "point is on negative(left) side: " << line.has_on_negative_side(Point_2{0, -1}) << "\n";
+  ss << "point is on positive(right) side: " << line.has_on_positive_side(Point_2{1, 0}) << "\n";
   std::cout << ss.str();
 
   Line_2 line1{-1, 1, 0};

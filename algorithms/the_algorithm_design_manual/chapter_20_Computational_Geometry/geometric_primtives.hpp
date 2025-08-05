@@ -42,11 +42,11 @@ float determinant_2D(const Point p1, const Point p2, const Point p3) {
  2 * A(t) = D(t), where t - triangle
  */
 float aria_of_triangle(const Point p1, const Point p2, const Point p3) {
-  return determinant_2D(p1, p2, p3) / 2;
+  return std::abs(determinant_2D(p1, p2, p3) / 2);
 }
 
 float aria_of_triangle(const Triangle t) {
-  return determinant_2D(t.p1, t.p2, t.p3) / 2;
+  return aria_of_triangle(t.p1, t.p2, t.p3);
 }
 
 /*
