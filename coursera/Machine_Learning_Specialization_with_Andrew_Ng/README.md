@@ -1,6 +1,8 @@
 # Machine Learning Specialization 
 Tutor: Andrew Ng
 
+> # Warning: this repo contains only optional labs from the course. 
+
 # Setup
 The project is intended to be used with `venv`. 
 This is also the configuration used by PyCharm projects.
