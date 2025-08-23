@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 import numpy as np
-import streamlit as st
+# import streamlit as st # don't install as it breaks tensorflow
 from matplotlib.ticker import (AutoMinorLocator, MultipleLocator)
 import random
 
@@ -58,5 +58,3 @@ ax.yaxis.set_major_locator(MultipleLocator(0.1))
 ax.grid(True)
 plt.title("Circle with Multidimensions")
 plt.show()
-
-# st.pyplot(fig)
