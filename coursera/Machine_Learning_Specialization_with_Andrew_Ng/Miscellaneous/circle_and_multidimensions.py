@@ -18,7 +18,7 @@ ax.set_aspect('equal')
 x_start = center[0]
 y_start = center[1]
 
-# Define a few angles (e.g., 0, 90, 180, 270 degrees)
+# Define a equal angles within a range
 degrees = np.arange(0, 360, 6)
 # print(degrees)
 # angles = np.radians([0, 45, 90, 135, 180, 225, 270, 315])
@@ -28,8 +28,6 @@ angles = np.radians(degrees)
 x_end = x_start + radius * np.cos(angles)
 y_end = y_start + radius * np.sin(angles)
 
-# Draw the vectors using quiver
-# ax.quiver(x_start, y_start, x_end - x_start, y_end - y_start, scale_units='xy', angles='xy', scale=1, color='red')
 # A simpler way is to plot lines directly for vectors from origin to a point
 random.seed(0.13)
 initial = None
