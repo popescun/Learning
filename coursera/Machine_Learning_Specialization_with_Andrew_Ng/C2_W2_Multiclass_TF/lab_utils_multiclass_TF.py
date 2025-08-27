@@ -96,8 +96,8 @@ def plt_cat_mc(X_train, y_train, model, classes):
     plot_cat_decision_boundary_mc(ax, X_train, model_predict, vector=True)
     ax.set_title("model decision boundary")
 
-    plt.xlabel(r'$x_0$');
-    plt.ylabel(r"$x_1$"); 
+    plt.xlabel(r'$x_0$')
+    plt.ylabel(r"$x_1$")
     plt.show()
 
     
@@ -106,11 +106,11 @@ def plt_prob_z(ax,fwb, x0_rng=(-8,8), x1_rng=(-5,4)):
         and adds a contour to show where z=0
     """
     #setup useful ranges and common linspaces
-    x0_space  = np.linspace(x0_rng[0], x0_rng[1], 40)
+    x0_space  = np.linspace(x0_rng[0], x0_rng[1], 40) #linspace = Return evenly spaced numbers over a specified interval.
     x1_space  = np.linspace(x1_rng[0], x1_rng[1], 40)
 
     # get probability for x0,x1 ranges
-    tmp_x0,tmp_x1 = np.meshgrid(x0_space,x1_space)
+    tmp_x0,tmp_x1 = np.meshgrid(x0_space,x1_space) # meshgrid = Return a tuple of coordinate matrices from coordinate vectors.
     z = np.zeros_like(tmp_x0)
     c = np.zeros_like(tmp_x0)
     for i in range(tmp_x0.shape[0]):
@@ -121,7 +121,7 @@ def plt_prob_z(ax,fwb, x0_rng=(-8,8), x1_rng=(-5,4)):
     with warnings.catch_warnings():  # suppress no contour warning
         warnings.simplefilter("ignore")
         #ax.contour(tmp_x0, tmp_x1, c, colors='b', linewidths=1)
-        ax.contour(tmp_x0, tmp_x1, c, linewidths=1) 
+        ax.contour(tmp_x0, tmp_x1, c, linewidths=1) # A contour plot, also known as a contour map or a level plot, is a graphical representation of a three-dimensional surface on a two-dimensional plane.
 
     cmap = plt.get_cmap('Blues')
     new_cmap = truncate_colormap(cmap, 0.0, 0.7)

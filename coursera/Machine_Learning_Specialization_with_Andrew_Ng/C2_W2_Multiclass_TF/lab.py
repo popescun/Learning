@@ -19,13 +19,16 @@ X_train, y_train = make_blobs(n_samples=m, centers=centers, cluster_std=std,rand
 
 plt_mc(X_train,y_train,classes, centers, std=std)
 
-tf.random.set_seed(1234)  # applied to achieve consistent results
+# tf.random.set_seed(1234)  # applied to achieve consistent results
 model = Sequential(
     [
+        tf.keras.Input(shape=(2,)), # this helps the model to already compute the no. of parameters
         Dense(2, activation = 'relu',   name = "L1"),
-        Dense(4, activation = 'linear', name = "L2")
+        Dense(4, activation = 'relu', name = "L2")
     ]
 )
+
+model.summary()
 
 model.compile(
     loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
