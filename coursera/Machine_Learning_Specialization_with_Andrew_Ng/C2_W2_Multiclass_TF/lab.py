@@ -24,7 +24,7 @@ model = Sequential(
     [
         tf.keras.Input(shape=(2,)), # this helps the model to already compute the no. of parameters
         Dense(2, activation = 'relu',   name = "L1"),
-        Dense(4, activation = 'relu', name = "L2")
+        Dense(4, activation = 'linear', name = "L2")
     ]
 )
 
