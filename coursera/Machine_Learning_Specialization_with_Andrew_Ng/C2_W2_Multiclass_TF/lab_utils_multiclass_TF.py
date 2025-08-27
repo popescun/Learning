@@ -90,9 +90,9 @@ def plt_cat_mc(X_train, y_train, model, classes):
     fig.canvas.header_visible = False
     fig.canvas.footer_visible = False
  
-    #add the original data to the decison boundary
+    #add the original data to the decision boundary
     plt_mc_data(ax, X_train,y_train, classes, map=dkcolors_map, legend=True)
-    #plot the decison boundary. 
+    #plot the decision boundary.
     plot_cat_decision_boundary_mc(ax, X_train, model_predict, vector=True)
     ax.set_title("model decision boundary")
 
@@ -103,7 +103,7 @@ def plt_cat_mc(X_train, y_train, model, classes):
     
 def plt_prob_z(ax,fwb, x0_rng=(-8,8), x1_rng=(-5,4)):
     """ plots a decision boundary but include shading to indicate the probability
-        and adds a conouter to show where z=0
+        and adds a contour to show where z=0
     """
     #setup useful ranges and common linspaces
     x0_space  = np.linspace(x0_rng[0], x0_rng[1], 40)
@@ -120,7 +120,7 @@ def plt_prob_z(ax,fwb, x0_rng=(-8,8), x1_rng=(-5,4)):
             c[i,j] = 0. if z[i,j] == 0 else 1.
     with warnings.catch_warnings():  # suppress no contour warning
         warnings.simplefilter("ignore")
-        #ax.contour(tmp_x0, tmp_x1, c, colors='b', linewidths=1) 
+        #ax.contour(tmp_x0, tmp_x1, c, colors='b', linewidths=1)
         ax.contour(tmp_x0, tmp_x1, c, linewidths=1) 
 
     cmap = plt.get_cmap('Blues')
