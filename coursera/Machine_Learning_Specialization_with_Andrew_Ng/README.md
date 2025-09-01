@@ -32,6 +32,7 @@ Some packages used in labs may require additional tools from bellow to be presen
 On `MacOs`:
 ```commandline
  brew install graphviz
+ brew install libomp
 ```
 
 ## Save requirements
