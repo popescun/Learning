@@ -27,8 +27,14 @@ or reopen the terminal in PyCharm. This will automatically activate the `.venv`.
 pip install -r requirements.txt
 ```
 
+### Install required tools
+Some packages used in labs may require additional tools from bellow to be present on your machine:
+On `MacOs`:
+```commandline
+ brew install graphviz
+```
+
 ## Save requirements
 ```commandline
 python -m pip freeze > requirements.txt
 ```
-
