@@ -5,8 +5,6 @@
 #ifndef CGAL_SWEEP_LINE_H
 #define CGAL_SWEEP_LINE_H
 
-#include <boost/multiprecision/gmp.hpp>
-
 #include <list>
 
 #include <CGAL/Arr_segment_traits_2.h>
