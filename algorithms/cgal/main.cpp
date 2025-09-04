@@ -2,6 +2,10 @@
 #include <CGAL/Polygon_2.h>
 #include <CGAL/Simple_cartesian.h>
 
+#include <boost/multiprecision/gmp.hpp>
+
+#include "sweep_line.hpp"
+
 int main() {
   using K = CGAL::Simple_cartesian<float>;
   using Point_2 = K::Point_2;
@@ -28,8 +32,10 @@ int main() {
   ss << "point is on: " << line.has_on(Point_2{1, 1}) << "\n";
   ss << "point is on: " << line.has_on(Point_2{0, 1}) << "\n";
   ss << "point is on: " << line.has_on(Point_2{1, 0}) << "\n";
-  ss << "point is on negative(left) side: " << line.has_on_negative_side(Point_2{0, -1}) << "\n";
-  ss << "point is on positive(right) side: " << line.has_on_positive_side(Point_2{1, 0}) << "\n";
+  ss << "point is on negative(left) side: "
+     << line.has_on_negative_side(Point_2{0, -1}) << "\n";
+  ss << "point is on positive(right) side: "
+     << line.has_on_positive_side(Point_2{1, 0}) << "\n";
   std::cout << ss.str();
 
   Line_2 line1{-1, 1, 0};
@@ -40,6 +46,8 @@ int main() {
   ss << "point is on: " << line1.has_on(Point_2{1, 0}) << "\n";
   ss << "point is on: " << line1.has_on(Point_2{2, 2}) << "\n";
   std::cout << ss.str();
+
+  sweep_line::test();
 
   return 0;
 }

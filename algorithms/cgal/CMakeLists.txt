@@ -10,6 +10,7 @@ find_package(Boost REQUIRED)
 project(cgal)
 
 file(GLOB headers *.hpp)
-add_executable(${PROJECT_NAME} main.cpp ${headers})
+add_executable(${PROJECT_NAME} main.cpp ${headers}
+        sweep_line.hpp)
 include_directories(${CMAKE_SOURCE_DIR}/../../../cgal/build/install/include)
 target_link_libraries(${PROJECT_NAME} Boost::headers)
