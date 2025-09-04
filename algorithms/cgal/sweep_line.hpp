@@ -5,6 +5,10 @@
 #ifndef CGAL_SWEEP_LINE_H
 #define CGAL_SWEEP_LINE_H
 
+// this header seems needed explicitly, to prevent error like:
+// error: incomplete type 'boost::multiprecision::backends::gmp_int' used in type trait expression
+#include <boost/multiprecision/gmp.hpp>
+
 #include <list>
 
 #include <CGAL/Arr_segment_traits_2.h>

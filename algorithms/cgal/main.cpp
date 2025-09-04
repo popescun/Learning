@@ -2,11 +2,10 @@
 #include <CGAL/Polygon_2.h>
 #include <CGAL/Simple_cartesian.h>
 
-#include <boost/multiprecision/gmp.hpp>
-
 #include "sweep_line.hpp"
 
 int main() {
+  // todo: move this code as separate example
   using K = CGAL::Simple_cartesian<float>;
   using Point_2 = K::Point_2;
   using Polygon_2 = CGAL::Polygon_2<K>;
