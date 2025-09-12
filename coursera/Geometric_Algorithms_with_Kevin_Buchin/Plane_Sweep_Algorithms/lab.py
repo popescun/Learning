@@ -146,10 +146,6 @@ def handleEndEvent(segment, Events, Status):
     if  pos_left >= 0 and pos_right < len(Status): checkIntersection(pos_left, pos_right, Events, Status)
 
 
-
-
-
-
 def handleIntersectionEvent(segment, segment2, Events, Status):
     currentY = segment.currentYList[0]
     segment.currentYList[
@@ -239,8 +235,8 @@ def readSegments(file):
 
 
 # TODO: change this to the filename where your segments are stored.
-# input = readSegments("segments1.txt")
-# sweep(input)
+input = readSegments("segments1.txt")
+sweep(input)
 
 input = readSegments("segments2.txt")
 sweep(input)
