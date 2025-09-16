@@ -13,7 +13,7 @@ class Point:
         self.id = int(numbers[0])
         self.x = int(numbers[1])
         self.y = int(numbers[2])
-        
+
 
 class Triangle:
     # helpful for drawing
@@ -95,9 +95,23 @@ class Triangle:
         v2 = other_t.v1 if other_t.v1 not in e else other_t.v2 if other_t.v2 not in e else other_t.v3 if other_t.v3 not in e else None
         return [v1, v2]
 
+    def __eq__(self, other):
+        return self.v1 == other.v1 and self.v2 == other.v2 and self.v3 == other.v3
+        pass
+
+    def find_adjacent_triangles(self, triangles: list["Triangle"]):
+        result = []
+        for t in triangles:
+            if self != t and self.common_edge(t):
+                result.append(t)
+        return result
+
     def flip_edges(self, other_t):
         c_e = self.common_edge(other_t)
         print(f'triangles: {self}, {other_t}')
+        if self == other_t:
+            print(f'triangles are equal, skip!')
+            return False
         print(f'common edge: {c_e}')
         if c_e is None:
             return False
@@ -171,10 +185,10 @@ triangles_count = min(50, len(triangles))
 
 flip_count = 0
 
-def triangulation(points: list[Point], triangles: list[Triangle], circumscribed_triangle):
+def triangulation(points: list[Point], triangles: list[Triangle], circumscribed_triangle = 0, manually = False):
     Triangle.annotations = [None] * len(triangles)
 
-    def redraw_triangles(count):
+    def draw_triangles(count):
         print('redraw_triangles...')
         ax.clear()
         ax.set_title(f'Triangulation({triangles_count})')
@@ -183,16 +197,32 @@ def triangulation(points: list[Point], triangles: list[Triangle], circumscribed_
         Triangle.annotations = [None] * count
         for i, t in enumerate(triangles[:count]):
             t.draw(i, circumscribed_triangle == i)
-        # ax.set_aspect('equal', adjustable='box')
+        ax.set_aspect('equal', adjustable='box')
         fig.canvas.draw()  # refresh
 
-    for i, t in enumerate(triangles[:triangles_count]):
-        t.draw(i, circumscribed_triangle == i)
-        for j in range(i - 1, -1, -1):
-            if t.flip_edges(triangles[j]):
+    if manually and circumscribed_triangle < len(triangles):
+        t = triangles[circumscribed_triangle]
+        adjacent_triangles = t.find_adjacent_triangles(triangles)
+        for other_t in adjacent_triangles:
+            if t.flip_edges(other_t):
                 global flip_count
                 flip_count += 1
-                redraw_triangles(i + 1)
+
+        draw_triangles(len(triangles))
+        return
+
+    flipped = True
+    while flipped:
+        flipped = False
+        draw_triangles(len(triangles))
+        for t in triangles[:triangles_count]:
+            adjacent_triangles = t.find_adjacent_triangles(triangles)
+            for other_t in adjacent_triangles:
+                if t.flip_edges(other_t):
+                    flip_count += 1
+                    flipped = True
+                    break
+
 
 def input_changed(triangle):
     # print(triangle)
@@ -201,7 +231,9 @@ def input_changed(triangle):
     ax.set_xlabel('x')
     ax.set_ylabel('y')
 
-    triangulation(points, triangles, int(triangle))
+    triangulation(points, triangles, int(triangle), True)
+
+    print(f'flip count: {flip_count}')
 
     ax.set_aspect('equal', adjustable='box')
     fig.canvas.draw() # refresh
@@ -213,7 +245,7 @@ ax.set_title(f'Triangulation({triangles_count})')
 ax.set_xlabel('x')
 ax.set_ylabel("y")
 
-triangulation(points, triangles, 0)
+triangulation(points, triangles)
 
 print(f'flip count: {flip_count}')
 
