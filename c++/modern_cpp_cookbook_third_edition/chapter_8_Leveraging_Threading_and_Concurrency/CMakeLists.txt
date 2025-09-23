@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.30)
 
+# we need clang 18 for c++ 20 features like std::jthread
+set(CMAKE_C_COMPILER " /opt/homebrew/Cellar/llvm@18/18.1.8/bin/clang")
+set(CMAKE_CXX_COMPILER " /opt/homebrew/Cellar/llvm@18/18.1.8/bin/clang")
+
+
 # https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
