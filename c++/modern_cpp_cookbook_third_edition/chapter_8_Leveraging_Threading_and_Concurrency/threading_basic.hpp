@@ -9,7 +9,7 @@
 #include <sstream>
 #include <thread>
 
-namespace threading_and_concurrency {
+namespace threading_basic {
 
 inline void print_time() {
   const auto now = std::chrono::system_clock::now();
@@ -54,6 +54,7 @@ inline void func6(std::chrono::seconds timeout) {
   std::cout << "func6..." << std::endl;
   const auto then = std::chrono::system_clock::now() + timeout;
   do {
+    std::cout << "yield..." << std::endl;
     std::this_thread::yield();
   } while (std::chrono::system_clock::now() < then);
 }

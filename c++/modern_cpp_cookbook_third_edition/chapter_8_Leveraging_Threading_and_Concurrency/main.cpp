@@ -1,6 +1,6 @@
-#include "threading_and_concurrency.hpp"
+#include "threading_basic.hpp"
 
 int main() {
-  threading_and_concurrency::test();
+  threading_basic::test();
   return 0;
 }
