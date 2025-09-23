@@ -21,18 +21,36 @@ inline void print_time() {
   std::cout << ss.str() << std::endl;
 }
 
-  void func1() {
-
+inline void func1() {
+  std::cout << "thread func1 without params" << std::endl;
 };
+
+inline void func2(int i, double d, const std::string& s) {
+  std::cout << "thread func2 with params " << i <<", " << d << ", " << s << std::endl;
+};
+
 
 inline void create_thread() {
 
   std::thread t;
+  t = std::thread([]() {
+    std::cout << "create thread after declaration" << std::endl;
+  });
 
-  std::thread t1
+  std::thread t1(func1);
+  std::thread t2([]() {
+    std::cout << "thread lambda without params" << std::endl;
+  });
+  std::thread t3(func2, 42, 42.0, "42");
+
+  t.join();
+  t1.join();
+  t2.join();
+  t3.join();
 }
 
 inline void test() {
   print_time();
+  create_thread();
 }
-} // namespace using_structured_bindings_to_handle_multi_return_values
+} // namespace threading_and_concurrency

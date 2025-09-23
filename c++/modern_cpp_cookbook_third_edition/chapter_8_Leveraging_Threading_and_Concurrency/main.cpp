@@ -1,4 +1,4 @@
-#include  "threading_and_concurrency.hpp"
+#include "threading_and_concurrency.hpp"
 
 int main() {
   threading_and_concurrency::test();
