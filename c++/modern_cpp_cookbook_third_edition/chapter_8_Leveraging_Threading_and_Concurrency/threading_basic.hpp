@@ -9,17 +9,11 @@
 #include <sstream>
 #include <thread>
 
+#include "utils.hpp"
+
 namespace threading_basic {
 
-inline void print_time() {
-  const auto now = std::chrono::system_clock::now();
-  const auto stime = std::chrono::system_clock::to_time_t(now);
-  const auto ltime = std::localtime(&stime);
-
-  std::stringstream ss;
-  ss << std::put_time(ltime, "%c") << '\n';
-  std::cout << ss.str();
-}
+using namespace utils;
 
 inline void func1() {
   std::cout << "thread func1 without params" << std::endl;
