@@ -6,9 +6,9 @@
 
 #include <iostream>
 
-using namespace std;
-
 namespace time_conversion {
+
+using namespace std;
 
 /*
  * Complete the 'timeConversion' function below.
