@@ -216,6 +216,11 @@ def triangulation(points: list[Point], triangles: list[Triangle], circumscribed_
         flipped = False
         draw_triangles(len(triangles))
         for t in triangles[:triangles_count]:
+            """
+            Notice that the edges are flipped without any ordering as suggested in the lab.
+            This may lead to a slightly different result, with more edges flipped than needed.
+            However, it seems the optimization implementation is not that trivial and is left for latter.  
+            """
             adjacent_triangles = t.find_adjacent_triangles(triangles)
             for other_t in adjacent_triangles:
                 if t.flip_edges(other_t):
