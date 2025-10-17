@@ -18,21 +18,93 @@ using namespace utils;
  *
  * 1. Define a mutex in the appropriate context (class or global scope).
  * 2. Acquire a lock on this mutex before accessing the shared resource in each thread.
+  *    The typical use of a mutex to protect access to a shared resource comprises locking
+  *    the mutex, using the shared resource, and then unlocking the mutex:
+  *
+  *      #include <mutex>
+  *      g_mutex.lock();
+  *      // use the shared resource such as std::cout
+  *      std::cout << "accessing shared resource" << '\n';
+  *      g_mutex.unlock();
+  *
+  *      This method of using the mutex is, however, prone to error. This is because each
+  *      call to lock() must be paired with a call to unlock() on all execution paths; that is,
+  *      both normal return paths and exception return paths.In order to safely acquire and
+  *      release a mutex, regardless of the way the execution of a function goes, the C++
+  *      standard defines several locking classes:
+  *
+  *      - std::lock_guard(<mutex> header) is the locking mechanism seen earlier; it represents a mutex
+  *      wrapper implemented in an RAII manner. It attempts to acquire the mutex at
+  *      the time of its construction and release it upon destruction. This is available in C++11.
+  *      It can work with recursive mutex as well.
+  *
+  *      - std::unique_lock(<mutex> header) is a mutex ownership wrapper that provides support for
+  *      deferred locking, time locking, recursive locking, transfer of ownership, and
+  *      using it with condition variables. This is available in C++11.
+  *
+  *      - std::shared_lock(<shared_mutex> header) is a mutex-shared ownership wrapper that provides
+  *      support for deferred locking, time locking, and transfer of ownership. This is available in C++14.
+  *
+  *      - std::scoped_lock(<mutex> header) is a wrapper for multiple mutexes implemented in an RAII manner. Upon
+  *      construction, it attempts to acquire ownership of the mutexes in a deadlock avoidance manner as if
+  *      it is using std::lock(), and upon destruction, it releases the mutexes in reverse order of the way
+  *      they were acquired. This is available in C++17.
+  *
  */
 
 // step 1
-std::mutex g_mutex;
+inline std::mutex g_mutex, g_mutex1;
+inline std::recursive_mutex g_recursive_mutex;
 
 inline void thread_func () {
   using namespace std::chrono_literals;
 
-
+  // using std::lock_guard
   {
     // step 2
-    std::lock_guard<std::mutex> lock{ g_mutex };
+    std::lock_guard lock{ g_mutex}; // no multiple mutexes!
+    // std::lock_guard<std::mutex> lock1{ g_mutex }; // this is a dead-lock !
+
+    std::lock_guard<std::recursive_mutex> lock2{ g_recursive_mutex };
+    std::lock_guard<std::recursive_mutex> lock3{ g_recursive_mutex }; // no dead-lock as the mutex is recursive
 
     print_time ();
-    std::cout << "running thread " << std::this_thread::get_id () << std::endl;
+    std::cout << "running thread with lock_guard" << std::this_thread::get_id () << std::endl;
+  }
+
+  std::this_thread::yield ();
+  std::this_thread::sleep_for (1s);
+
+  // using std::unique_lock
+  {
+    // step 2
+    std::unique_lock lock{ g_mutex}; // no multiple mutexes!
+    // std::unique_lock<std::mutex> lock1{ g_mutex}; // this is a dead-lock !
+
+    std::unique_lock<std::recursive_mutex> lock2{ g_recursive_mutex};
+    std::unique_lock<std::recursive_mutex> lock3{ g_recursive_mutex}; // no dead_lock as the mutex is recursive
+
+    std::unique_lock lock5( g_mutex1, std::defer_lock); // deferred lock, no lock yet!
+    lock5.lock(); // here g_mutex1 is locked
+
+    print_time ();
+    std::cout << "still running thread with unique_lock" << std::this_thread::get_id () << std::endl;
+  }
+
+  std::this_thread::yield ();
+  std::this_thread::sleep_for (1s);
+
+  // using scoped_lock
+  {
+    // step 2
+    std::scoped_lock lock{ g_mutex, g_mutex1}; // can lock multiple mutexes
+    // std::unique_lock<std::mutex> lock1{ g_mutex}; // this is a dead-lock !
+
+    std::scoped_lock lock2{ g_recursive_mutex};
+    std::scoped_lock lock3{ g_recursive_mutex}; // no dead_lock as the mutex is recursive
+
+    print_time ();
+    std::cout << "still running thread with scoped_lock" << std::this_thread::get_id () << std::endl;
   }
 
   std::this_thread::yield ();
@@ -42,7 +114,7 @@ inline void thread_func () {
     // step 2
     std::lock_guard<std::mutex> lock{ g_mutex };
     print_time ();
-    std::cout << "done in thread " << std::this_thread::get_id () << std::endl;
+    std::cout << "done in thread with lock_guard" << std::this_thread::get_id () << std::endl;
   }
 }
 
@@ -147,7 +219,7 @@ inline void test_multiple_shared_resource() {
 }
 
 inline void test () {
-  // test_single_shared_resource();
-  test_multiple_shared_resource();
+  test_single_shared_resource();
+  // test_multiple_shared_resource();
 }
 } // namespace shared_data_access_sync
