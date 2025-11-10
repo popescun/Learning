@@ -22,7 +22,6 @@ utils::measure_time measure_cold;
 utils::measure_time measure_warm;
 
 inline void BM_CacheCold(benchmark::State &state) {
-  std::cout << "BM_CacheCold..." << std::endl;
   // Generate random indices
   for (auto &index : indices) {
     index = rand() % kSize;
@@ -39,7 +38,6 @@ inline void BM_CacheCold(benchmark::State &state) {
     benchmark::ClobberMemory();
   }
 }
-BENCHMARK(BM_CacheCold);
 
 inline void BM_CacheWarm(benchmark::State &state) {
   // Warm cache by accessing data in sequential order
@@ -61,9 +59,12 @@ inline void BM_CacheWarm(benchmark::State &state) {
     benchmark::ClobberMemory();
   }
 }
-BENCHMARK(BM_CacheWarm);
 
 inline void test() {
+  BENCHMARK(BM_CacheCold);
+  BENCHMARK(BM_CacheWarm);
+
+  // todo: extract this to an utils that can be used in all `test` methods
   int argc{0};
   char **argv{nullptr};
   // benchmark::MaybeReenterWithoutASLR(argc, argv);
