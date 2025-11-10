@@ -1,5 +1,7 @@
 # C++ design patterns for low-latency applications including high-frequency trading
-Authors: Paul Bilokon, Burak Gunduz
+- Authors: Paul Bilokon, Burak Gunduz
+- repo: https://github.com/0burak/imperial_hft
+
 ___
 ## 2.3 Design patterns
 
