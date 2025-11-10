@@ -1,6 +1,6 @@
-#include "low_latency.hpp"
+#include "cache_warming.hpp"
 
 int main() {
-  low_latency::test();
+  cache_warming::test();
   return 0;
 }
