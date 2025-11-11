@@ -167,7 +167,7 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
   return std::make_unique<CallExpressionAST>(id_name, std::move(arguments));
 }
 
-std::unique_ptr<ExpressionAST> ParserAST::parse_current_token() {
+std::unique_ptr<ExpressionAST> ParserAST::parse_primary_expression() {
   switch (Lexer::to_reserved_token(lexer_.current_token_)) {
   case ReservedToken::token_identifier:
     return parse_identifier_expression();
@@ -178,6 +178,46 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_current_token() {
   default:
     log_error("unknown token when expecting an expression");
     return {};
+  }
+}
+
+std::unique_ptr<ExpressionAST>
+ParserAST::parse_binary_operation_rhs(Token expression_precedence,
+                                      std::unique_ptr<ExpressionAST> lhs) {
+  // if this is a binop, find its precedence
+  while (true) {
+    const auto token_precedence = lexer_.get_token_precedence();
+
+    // if this is a binop that binds at least tightly as the current binop,
+    // consume it, otherwise we are done.
+    if (token_precedence != expression_precedence) {
+      return lhs;
+    }
+
+    // alright, we know this is a binop
+    auto binary_op = lexer_.current_token_;
+    // east binop
+    lexer_.get_next_token();
+
+    // parse the primary expression after the binary operator
+    auto rhs = parse_primary_expression();
+    if (!rhs) {
+      return {};
+    }
+
+    // if binop binds less tightly with rhs than the operator after rhs, let the
+    // pending operator take rhs as its lhs.
+    auto next_precedence = lexer_.get_token_precedence();
+    if (token_precedence != next_precedence) {
+      rhs = parse_binary_operation_rhs(static_cast<Token>(token_precedence + 1),
+                                       std::move(rhs));
+      if (!rhs) {
+        return {};
+      }
+    }
+
+    lhs = std::make_unique<BinaryExpressionAST>(binary_op, std::move(rhs),
+                                                std::move(lhs));
   }
 }
 

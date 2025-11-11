@@ -38,26 +38,39 @@ struct Lexer {
   /**
    * Get the next character token from standard input.
    *
-   * @return next token
+   * Reads another token, parse it and updates `current_token_` with its
+   * results. It also updates `next_char_` without parsing it.
+   *
+   *
+   * @return current token
    */
   Token get_next_token();
 
+  /**
+   * Get the precedence of the pending binary operator token.
+   * @return token precedence
+   */
   Token get_token_precedence();
 
+  // conversion helper
   static Token to_token(ReservedToken token) {
     return static_cast<Token>(token);
   }
 
+  // conversion helper
   static ReservedToken to_reserved_token(Token token) {
     return static_cast<ReservedToken>(token);
   }
 
+  // next unparsed token
   Token next_token_{to_token(ReservedToken::token_unknown)};
+  // current parsed token the lexer is looking at.
   Token current_token_{to_token(ReservedToken::token_unknown)};
   // filled in if token_identifier
   std::string identifier_{"none"};
-  // Filled in if token_number
+  // filled in if token_number
   double number_value_{0};
+  // this holds the precedence for each binary operator token that is defined.
   BinaryOperationPrecedence binary_op_precedence_;
 };
 
