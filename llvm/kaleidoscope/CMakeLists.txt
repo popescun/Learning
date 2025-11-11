@@ -10,8 +10,10 @@ project(toy)
 find_package(benchmark REQUIRED)
 
 file(GLOB headers *.hpp)
-add_executable(${PROJECT_NAME} main.cpp ${headers}
-  build/lexer.hpp)
-#include_directories(${CMAKE_SOURCE_DIR}/include)
+file(GLOB cpp_files *.cpp)
+add_executable(${PROJECT_NAME}
+  ${headers}
+  ${cpp_files}
+)
 
 target_link_libraries(${PROJECT_NAME} benchmark::benchmark)
