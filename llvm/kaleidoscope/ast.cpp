@@ -76,12 +76,13 @@ private:
  */
 class FunctionPrototypeAST {
 public:
-  FunctionPrototypeAST(std::string name, std::vector<std::string> arguments)
-      : name_{std::move(name)}, arguments_{std::move(arguments)} {}
+  FunctionPrototypeAST(std::string name,
+                       std::vector<std::string> arguments_names)
+      : name_{std::move(name)}, arguments_names_{std::move(arguments_names)} {}
 
 private:
   std::string name_;
-  std::vector<std::string> arguments_;
+  std::vector<std::string> arguments_names_;
 };
 
 static void log_error(const char *token) {
@@ -113,7 +114,7 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_number_expression() {
 std::unique_ptr<ExpressionAST> ParserAST::parse_parenthesis_expression() {
   // eat opening '('
   lexer_.get_next_token();
-  auto expression = ParseExpression();
+  auto expression = parse_primary_expression();
   if (!expression) {
     return {};
   }
@@ -143,7 +144,7 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
   std::vector<std::unique_ptr<ExpressionAST>> arguments;
   if (lexer_.current_token_ != ')') {
     while (true) {
-      if (auto arg = ParseExpression()) {
+      if (auto arg = parse_primary_expression()) {
         arguments.push_back(std::move(arg));
       } else {
         return {};
@@ -186,7 +187,7 @@ ParserAST::parse_binary_operation_rhs(Token expression_precedence,
                                       std::unique_ptr<ExpressionAST> lhs) {
   // if this is a binop, find its precedence
   while (true) {
-    const auto token_precedence = lexer_.get_token_precedence();
+    const auto token_precedence = lexer_.get_current_token_precedence();
 
     // if this is a binop that binds at least tightly as the current binop,
     // consume it, otherwise we are done.
@@ -196,7 +197,7 @@ ParserAST::parse_binary_operation_rhs(Token expression_precedence,
 
     // alright, we know this is a binop
     auto binary_op = lexer_.current_token_;
-    // east binop
+    // eat binop
     lexer_.get_next_token();
 
     // parse the primary expression after the binary operator
@@ -207,8 +208,8 @@ ParserAST::parse_binary_operation_rhs(Token expression_precedence,
 
     // if binop binds less tightly with rhs than the operator after rhs, let the
     // pending operator take rhs as its lhs.
-    auto next_precedence = lexer_.get_token_precedence();
-    if (token_precedence != next_precedence) {
+    if (const auto next_precedence = lexer_.get_current_token_precedence();
+        token_precedence != next_precedence) {
       rhs = parse_binary_operation_rhs(static_cast<Token>(token_precedence + 1),
                                        std::move(rhs));
       if (!rhs) {
@@ -218,6 +219,125 @@ ParserAST::parse_binary_operation_rhs(Token expression_precedence,
 
     lhs = std::make_unique<BinaryExpressionAST>(binary_op, std::move(rhs),
                                                 std::move(lhs));
+  }
+}
+
+std::unique_ptr<ExpressionAST> ParserAST::parse_expression() {
+  auto lhs = parse_primary_expression();
+  if (!lhs) {
+    return {};
+  }
+  return parse_binary_operation_rhs(0, std::move(lhs));
+}
+
+std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_function_prototype() {
+  if (lexer_.current_token_ !=
+      Lexer::to_token(ReservedToken::token_identifier)) {
+    log_error("expected function name in prototype");
+    return {};
+  }
+
+  auto function_name = lexer_.identifier_;
+  lexer_.get_next_token();
+
+  if (lexer_.current_token_ != '(') {
+    log_error("expected '(' in prototype");
+  }
+
+  std::vector<std::string> arguments_names;
+  while (lexer_.get_current_token_precedence() ==
+         Lexer::to_token(ReservedToken::token_identifier)) {
+    arguments_names.push_back(lexer_.identifier_);
+  }
+  if (lexer_.current_token_ != ')') {
+    log_error("expected ')' in prototype");
+  }
+
+  // success
+  // eat ')'
+  lexer_.get_next_token();
+
+  return std::make_unique<FunctionPrototypeAST>(function_name,
+                                                std::move(arguments_names));
+}
+
+std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_function_definition() {
+  // eat 'def'
+  lexer_.get_next_token();
+
+  auto function_prototype = parse_function_prototype();
+  if (!function_prototype) {
+    return {};
+  }
+
+  if (auto expression = parse_expression()) {
+    return std::make_unique<FunctionDefinitionAST>(
+        std::move(function_prototype), std::move(expression));
+  }
+
+  return {};
+}
+
+std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_top_level_expression() {
+  if (auto expression = parse_expression()) {
+    // make a function prototype with anonymous name
+    auto function_prototype = std::make_unique<FunctionPrototypeAST>(
+        "__anon_expr", std::vector<std::string>());
+    return std::make_unique<FunctionDefinitionAST>(
+        std::move(function_prototype), std::move(expression));
+  }
+  return {};
+}
+
+std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_external() {
+  // eat extern
+  lexer_.get_next_token();
+  return parse_function_prototype();
+}
+
+void ParserAST::handle_function_definition() {
+  if (parse_function_definition()) {
+    fprintf(stderr, "parsed a function definition\n");
+  } else {
+    // skip token for error recovery
+    lexer_.get_next_token();
+  }
+}
+void ParserAST::handle_extern() {
+  if (parse_external()) {
+    fprintf(stderr, "parsed an external function\n");
+  } else {
+    // skip token for error recovery
+    lexer_.get_next_token();
+  }
+}
+void ParserAST::handle_top_level_expression() {
+  if (parse_top_level_expression()) {
+    fprintf(stderr, "parsed a top level expression\n");
+  } else {
+    // skip token for error recovery
+    lexer_.get_next_token();
+  }
+}
+void ParserAST::main_loop() {
+  while (true) {
+    fprintf(stderr, "toy> ");
+    switch (Lexer::to_reserved_token(lexer_.current_token_)) {
+    case ReservedToken::token_eof:
+      return;
+    case ReservedToken::token_identifier:
+      lexer_.get_next_token();
+      break;
+    case ReservedToken::token_function_definition:
+      handle_function_definition();
+      break;
+    case ReservedToken::token_external_function:
+      handle_extern();
+      break;
+    default:
+      handle_top_level_expression();
+      break;
+    }
   }
 }
 

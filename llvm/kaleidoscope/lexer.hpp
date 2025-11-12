@@ -18,13 +18,14 @@ enum class ReservedToken : Token {
   token_eof = -1,
 
   // commands
-  token_def = -2,
-  token_extern = -3,
+  token_function_definition = -2,
+  token_external_function = -3,
 
   // primary
   token_identifier = -4,
   token_number = -5,
   token_leading_parenthesis = '(',
+  token_semicolon = ';',
   token_unknown = -6
 };
 
@@ -33,8 +34,6 @@ enum class ReservedToken : Token {
  * of these for known things.
  */
 struct Lexer {
-  using BinaryOperationPrecedence = std::map<Token, Token>;
-
   /**
    * Get the next character token from standard input.
    *
@@ -50,7 +49,7 @@ struct Lexer {
    * Get the precedence of the pending binary operator token.
    * @return token precedence
    */
-  Token get_token_precedence();
+  std::uint8_t get_current_token_precedence();
 
   // conversion helper
   static Token to_token(ReservedToken token) {
@@ -70,6 +69,7 @@ struct Lexer {
   std::string identifier_{"none"};
   // filled in if token_number
   double number_value_{0};
+  using BinaryOperationPrecedence = std::map<Token, Token>;
   // this holds the precedence for each binary operator token that is defined.
   BinaryOperationPrecedence binary_op_precedence_;
 };

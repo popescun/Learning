@@ -21,11 +21,11 @@ Token Lexer::get_next_token() {
       identifier_ += std::to_string(next_token_);
 
       if (identifier_ == "def") {
-        return to_token(ReservedToken::token_def);
+        return to_token(ReservedToken::token_function_definition);
       }
 
       if (identifier_ == "extern") {
-        return to_token(ReservedToken::token_extern);
+        return to_token(ReservedToken::token_external_function);
       }
 
       return to_token(ReservedToken::token_identifier);
@@ -65,7 +65,7 @@ Token Lexer::get_next_token() {
   return current_token_;
 }
 
-Token Lexer::get_token_precedence() {
+uint8_t Lexer::get_current_token_precedence() {
   if (!isascii(current_token_)) {
     return -1;
   }

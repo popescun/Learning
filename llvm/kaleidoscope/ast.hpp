@@ -16,6 +16,8 @@
 namespace toy {
 
 class ExpressionAST;
+class FunctionPrototypeAST;
+class FunctionDefinitionAST;
 
 struct ParserAST {
   /**
@@ -57,9 +59,60 @@ struct ParserAST {
    *
    * @return an ExpressionAST`
    */
-  std::unique_ptr<ExpressionAST> parse_binary_operation_rhs(Token expression_precedence, std::unique_ptr<ExpressionAST> lhs);
+  std::unique_ptr<ExpressionAST>
+  parse_binary_operation_rhs(Token expression_precedence,
+                             std::unique_ptr<ExpressionAST> lhs);
 
-  std::unique_ptr<ExpressionAST> ParseExpression() { return {}; }
+  /**
+   * Parse an expression with syntax:
+   *    expression ::= primary binoprhs
+   *
+   * @return an ExpressionAST
+   */
+  std::unique_ptr<ExpressionAST> parse_expression();
+
+  /**
+   * Parse a function prototype with syntax:
+   *    prototype ::= id '(' id* ')'
+   *
+   * @return a FunctionPrototypeAST
+   */
+  std::unique_ptr<FunctionPrototypeAST> parse_function_prototype();
+
+  /**
+   * Parse a function definition with syntax:
+   *    definition ::= 'def' prototype expression
+   *
+   * @return a FunctionDefinitionAST
+   */
+  std::unique_ptr<FunctionDefinitionAST> parse_function_definition();
+
+  /**
+   * Parse top level expression with syntax:
+   *    toplevelexpr ::= expression
+   *
+   * @return a FunctionDefinitionAST
+   */
+  std::unique_ptr<FunctionDefinitionAST> parse_top_level_expression();
+
+  /**
+   * Parse external n with syntax:
+   *    external ::= 'extern' prototype
+   *
+   * @return a FunctionPrototypeAST
+   */
+  std::unique_ptr<FunctionPrototypeAST> parse_external();
+
+  void handle_function_definition();
+  void handle_extern();
+  void handle_top_level_expression();
+
+  /**
+   * Handle input expressions with syntax:
+   *  top ::= definition | external | expression | ';'
+   */
+  void main_loop();
+
   Lexer lexer_;
 };
 
