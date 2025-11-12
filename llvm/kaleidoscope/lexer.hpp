@@ -71,7 +71,13 @@ struct Lexer {
   double number_value_{0};
   using BinaryOperationPrecedence = std::map<Token, Token>;
   // this holds the precedence for each binary operator token that is defined.
-  BinaryOperationPrecedence binary_op_precedence_;
+  // Install standard binary operators, first has the lowest precedence.
+  BinaryOperationPrecedence binary_op_precedence_ = {
+    {'<', 10},
+    {'+', 20},
+    {'-', 20},
+    {'*', 40}
+  };
 };
 
 } // namespace toy
