@@ -24,6 +24,7 @@ enum class ReservedToken : Token {
   // primary
   token_identifier = -4,
   token_number = -5,
+  token_whitespace = ' ',
   token_leading_parenthesis = '(',
   token_semicolon = ';',
   token_unknown = -6
@@ -35,10 +36,11 @@ enum class ReservedToken : Token {
  */
 struct Lexer {
   /**
-   * Get the next character token from standard input.
+   * Get the current token and update next character token from standard input.
    *
    * Reads another token, parse it and updates `current_token_` with its
-   * results. It also updates `next_char_` without parsing it.
+   * results. It also updates next character token `next_token_` without parsing
+   * it.
    *
    *
    * @return current token
@@ -49,7 +51,7 @@ struct Lexer {
    * Get the precedence of the pending binary operator token.
    * @return token precedence
    */
-  std::uint8_t get_current_token_precedence();
+  std::int8_t get_current_token_precedence();
 
   // conversion helper
   static Token to_token(ReservedToken token) {
@@ -62,7 +64,7 @@ struct Lexer {
   }
 
   // next unparsed token
-  Token next_token_{to_token(ReservedToken::token_unknown)};
+  Token next_token_{to_token(ReservedToken::token_whitespace)};
   // current parsed token the lexer is looking at.
   Token current_token_{to_token(ReservedToken::token_unknown)};
   // filled in if token_identifier
@@ -73,11 +75,7 @@ struct Lexer {
   // this holds the precedence for each binary operator token that is defined.
   // Install standard binary operators, first has the lowest precedence.
   BinaryOperationPrecedence binary_op_precedence_ = {
-    {'<', 10},
-    {'+', 20},
-    {'-', 20},
-    {'*', 40}
-  };
+      {'<', 10}, {'+', 20}, {'-', 20}, {'*', 40}};
 };
 
 } // namespace toy

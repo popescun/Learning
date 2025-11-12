@@ -10,37 +10,42 @@ Token Lexer::get_next_token() {
   auto get_char = []() -> Token { return static_cast<Token>(std::getchar()); };
 
   // skip any whitespace
-  if (isspace(next_token_)) {
+  while (isspace(next_token_)) {
     next_token_ = get_char();
   }
 
   // identifier_: [a-zA-Z][a-zA-Z0-9]*
   if (isalpha(next_token_)) {
-    identifier_ = std::to_string(next_token_);
+    identifier_ = next_token_;
     while (isalnum(next_token_ = get_char())) {
-      identifier_ += std::to_string(next_token_);
-
-      if (identifier_ == "def") {
-        return to_token(ReservedToken::token_function_definition);
-      }
-
-      if (identifier_ == "extern") {
-        return to_token(ReservedToken::token_external_function);
-      }
-
-      return to_token(ReservedToken::token_identifier);
+      identifier_ += next_token_;
     }
+
+    if (identifier_ == "def") {
+      current_token_ = to_token(ReservedToken::token_function_definition);
+      return current_token_;
+    }
+
+    if (identifier_ == "extern") {
+      current_token_ = to_token(ReservedToken::token_external_function);
+      return current_token_;
+    }
+
+    // otherwise is an identifier
+    current_token_ = to_token(ReservedToken::token_identifier);
+    return current_token_;
   }
 
   // number: [0-9.]+
   if (isdigit(next_token_) || next_token_ == '.') {
     std::string number;
     do {
-      number += std::to_string(next_token_);
+      number += next_token_;
       next_token_ = get_char();
     } while (isdigit(next_token_) || next_token_ == '.');
     number_value_ = strtod(number.c_str(), nullptr);
-    return to_token(ReservedToken::token_number);
+    current_token_ = to_token(ReservedToken::token_number);
+    return current_token_;
   }
 
   // comment until end of line
@@ -56,20 +61,22 @@ Token Lexer::get_next_token() {
 
   // check for end of file. Don't eat the EOF.
   if (next_token_ == EOF) {
-    return to_token(ReservedToken::token_eof);
+    current_token_ = to_token(ReservedToken::token_eof);
+    return current_token_;
   }
 
-  // otherwise, just return the character as its ascii value.
+  // otherwise, just return the character as its ascii value
   current_token_ = next_token_;
   next_token_ = get_char();
   return current_token_;
 }
 
-uint8_t Lexer::get_current_token_precedence() {
+std::int8_t Lexer::get_current_token_precedence() {
   if (!isascii(current_token_)) {
     return -1;
   }
 
+  // make sure it's a predefined binary operation
   const auto &token_precedence = binary_op_precedence_[current_token_];
   if (token_precedence <= 0) {
     return -1;
