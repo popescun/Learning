@@ -144,7 +144,7 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
   std::vector<std::unique_ptr<ExpressionAST>> arguments;
   if (lexer_.current_token_ != ')') {
     while (true) {
-      if (auto argument = parse_primary_expression(); argument) {
+      if (auto argument = parse_primary_expression()) {
         arguments.push_back(std::move(argument));
       } else {
         return {};
@@ -273,8 +273,7 @@ std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_function_definition() {
     return {};
   }
 
-  auto expression = parse_expression();
-  if (expression) {
+  if (auto expression = parse_expression()) {
     return std::make_unique<FunctionDefinitionAST>(
         std::move(function_prototype), std::move(expression));
   }
@@ -283,7 +282,7 @@ std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_function_definition() {
 }
 
 std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_top_level_expression() {
-  if (auto expression = parse_expression(); expression) {
+  if (auto expression = parse_expression()) {
     // make a function prototype with anonymous name
     auto function_prototype = std::make_unique<FunctionPrototypeAST>(
         "__anon_expr", std::vector<std::string>());
@@ -332,12 +331,12 @@ void ParserAST::main_loop() {
   lexer_.get_next_token();
 
   while (true) {
-    fprintf(stderr, "toy> ");
     switch (Lexer::to_reserved_token(lexer_.current_token_)) {
     case ReservedToken::token_eof:
       return;
     // ignore top-level semicolon
     case ReservedToken::token_semicolon:
+      fprintf(stderr, "toy> ");
       lexer_.get_next_token();
       break;
     case ReservedToken::token_function_definition:
