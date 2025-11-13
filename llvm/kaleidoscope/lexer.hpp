@@ -36,7 +36,7 @@ enum class ReservedToken : Token {
  */
 struct Lexer {
   /**
-   * Get the current token and update next character token from standard input.
+   * Update current token and next character token from standard input.
    *
    * Reads another token, parse it and updates `current_token_` with its
    * results. It also updates next character token `next_token_` without parsing
@@ -45,7 +45,17 @@ struct Lexer {
    *
    * @return current token
    */
-  Token get_next_token();
+  void next_token();
+
+  /**
+   * Helper function to get next token.
+   *
+   * @return Token
+   */
+  Token get_next_token() {
+    next_token();
+    return current_token_;
+  }
 
   /**
    * Get the precedence of the pending binary operator token.
@@ -63,9 +73,9 @@ struct Lexer {
     return static_cast<ReservedToken>(token);
   }
 
-  // next unparsed token
+  // next character(unparsed) token
   Token next_token_{to_token(ReservedToken::token_whitespace)};
-  // current parsed token the lexer is looking at.
+  // current parsed token the lexer is looking at
   Token current_token_{to_token(ReservedToken::token_unknown)};
   // filled in if token_identifier
   std::string identifier_{"none"};

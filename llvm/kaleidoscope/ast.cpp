@@ -107,13 +107,13 @@ private:
 
 std::unique_ptr<ExpressionAST> ParserAST::parse_number_expression() {
   auto result = std::make_unique<NumberExpressionAST>(lexer_.number_value_);
-  lexer_.get_next_token();
+  lexer_.next_token();
   return std::move(result);
 }
 
 std::unique_ptr<ExpressionAST> ParserAST::parse_parenthesis_expression() {
   // eat opening '('
-  lexer_.get_next_token();
+  lexer_.next_token();
   auto expression = parse_primary_expression();
   if (!expression) {
     return {};
@@ -124,14 +124,14 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_parenthesis_expression() {
     return {};
   }
   // eat ending ')'
-  lexer_.get_next_token();
+  lexer_.next_token();
   return expression;
 }
 
 std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
   auto id_name = lexer_.identifier_;
   // eat identifier
-  lexer_.get_next_token();
+  lexer_.next_token();
 
   // simple variable reference
   if (lexer_.current_token_ != '(') {
@@ -140,7 +140,7 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
 
   // function call
   // eat opening '('
-  lexer_.get_next_token();
+  lexer_.next_token();
   std::vector<std::unique_ptr<ExpressionAST>> arguments;
   if (lexer_.current_token_ != ')') {
     while (true) {
@@ -158,12 +158,12 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
         log_error("expected ')' or ',' in argument list");
         return {};
       }
-      lexer_.get_next_token();
+      lexer_.next_token();
     }
   }
 
   // eat ending ')'
-  lexer_.get_next_token();
+  lexer_.next_token();
 
   return std::make_unique<CallExpressionAST>(id_name, std::move(arguments));
 }
@@ -198,7 +198,7 @@ ParserAST::parse_binary_operation_rhs(Token expression_precedence,
     // alright, we know this is a binop
     auto binary_op = lexer_.current_token_;
     // eat binop
-    lexer_.get_next_token();
+    lexer_.next_token();
 
     // parse the primary expression after the binary operator
     auto rhs = parse_primary_expression();
@@ -239,7 +239,7 @@ std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_function_prototype() {
   }
 
   auto function_name = lexer_.identifier_;
-  lexer_.get_next_token();
+  lexer_.next_token();
 
   if (lexer_.current_token_ != '(') {
     log_error_prototype("expected '(' in prototype");
@@ -258,7 +258,7 @@ std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_function_prototype() {
 
   // success
   // eat ')'
-  lexer_.get_next_token();
+  lexer_.next_token();
 
   return std::make_unique<FunctionPrototypeAST>(function_name,
                                                 std::move(arguments_names));
@@ -266,7 +266,7 @@ std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_function_prototype() {
 
 std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_function_definition() {
   // eat 'def'
-  lexer_.get_next_token();
+  lexer_.next_token();
 
   auto function_prototype = parse_function_prototype();
   if (!function_prototype) {
@@ -294,7 +294,7 @@ std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_top_level_expression() {
 
 std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_external() {
   // eat extern
-  lexer_.get_next_token();
+  lexer_.next_token();
   return parse_function_prototype();
 }
 
@@ -303,7 +303,7 @@ void ParserAST::handle_function_definition() {
     fprintf(stderr, "parsed a function definition\n");
   } else {
     // skip token for error recovery
-    lexer_.get_next_token();
+    lexer_.next_token();
   }
 }
 
@@ -312,7 +312,7 @@ void ParserAST::handle_extern() {
     fprintf(stderr, "parsed an external function\n");
   } else {
     // skip token for error recovery
-    lexer_.get_next_token();
+    lexer_.next_token();
   }
 }
 
@@ -321,14 +321,14 @@ void ParserAST::handle_top_level_expression() {
     fprintf(stderr, "parsed a top level expression\n");
   } else {
     // skip token for error recovery
-    lexer_.get_next_token();
+    lexer_.next_token();
   }
 }
 
 void ParserAST::main_loop() {
   // prime the first token
   fprintf(stderr, "toy> ");
-  lexer_.get_next_token();
+  lexer_.next_token();
 
   while (true) {
     switch (Lexer::to_reserved_token(lexer_.current_token_)) {
@@ -337,7 +337,7 @@ void ParserAST::main_loop() {
     // ignore top-level semicolon
     case ReservedToken::token_semicolon:
       fprintf(stderr, "toy> ");
-      lexer_.get_next_token();
+      lexer_.next_token();
       break;
     case ReservedToken::token_function_definition:
       handle_function_definition();

@@ -6,7 +6,7 @@
 
 namespace toy {
 
-Token Lexer::get_next_token() {
+void Lexer::next_token() {
   auto get_char = []() -> Token { return static_cast<Token>(std::getchar()); };
 
   // skip any whitespace
@@ -23,17 +23,17 @@ Token Lexer::get_next_token() {
 
     if (identifier_ == "def") {
       current_token_ = to_token(ReservedToken::token_function_definition);
-      return current_token_;
+      return;
     }
 
     if (identifier_ == "extern") {
       current_token_ = to_token(ReservedToken::token_external_function);
-      return current_token_;
+      return;
     }
 
     // otherwise is an identifier
     current_token_ = to_token(ReservedToken::token_identifier);
-    return current_token_;
+    return;
   }
 
   // number: [0-9.]+
@@ -45,7 +45,7 @@ Token Lexer::get_next_token() {
     } while (isdigit(next_token_) || next_token_ == '.');
     number_value_ = strtod(number.c_str(), nullptr);
     current_token_ = to_token(ReservedToken::token_number);
-    return current_token_;
+    return;
   }
 
   // comment until end of line
@@ -55,20 +55,21 @@ Token Lexer::get_next_token() {
     } while (next_token_ != EOF && next_token_ != '\n' && next_token_ != 'r');
 
     if (next_token_ != EOF) {
-      return get_next_token();
+      next_token();
+      return;
     }
   }
 
   // check for end of file. Don't eat the EOF.
   if (next_token_ == EOF) {
     current_token_ = to_token(ReservedToken::token_eof);
-    return current_token_;
+    return;
   }
 
   // otherwise, just return the character as its ascii value
   current_token_ = next_token_;
   next_token_ = get_char();
-  return current_token_;
+  return;
 }
 
 std::int8_t Lexer::get_current_token_precedence() {
