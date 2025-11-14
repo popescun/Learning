@@ -4,11 +4,30 @@
 
 #include "ast.hpp"
 
+#include <llvm/ADT/APFloat.h>
+#include <llvm/ADT/STLExtras.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Type.h>
+#include <llvm/IR/Verifier.h>
+
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace toy {
+
+using namespace llvm;
+
+namespace {
+void log_error(const char *token) { fprintf(stderr, "error: %s\n", token); }
+
+void log_error_prototype(const char *token) { log_error(token); }
+
+ParserAST &parser_ast = ParserAST::instance();
+} // namespace
 
 using Token = Token;
 /**
@@ -17,6 +36,7 @@ using Token = Token;
 class ExpressionAST {
 public:
   virtual ~ExpressionAST() = default;
+  virtual llvm::Value *codegen() = 0;
 };
 
 /**
@@ -25,6 +45,9 @@ public:
 class NumberExpressionAST final : public ExpressionAST {
 public:
   explicit NumberExpressionAST(double value) : value_{value} {}
+  Value *codegen() override {
+    return ConstantFP::get(*parser_ast.llvm_context_, APFloat(value_));
+  }
 
 private:
   double value_;
@@ -36,8 +59,15 @@ private:
 class VariableExpressionAST final : public ExpressionAST {
 public:
   explicit VariableExpressionAST(std::string name) : name_{std::move(name)} {}
+  Value *codegen() override {
+    auto *variable = parser_ast.function_parameters_[name_];
+    if (!variable) {
+      log_error("unknown variable name");
+      return {};
+    }
+    return variable;
+  }
 
-private:
   std::string name_;
 };
 
@@ -49,9 +79,39 @@ public:
   explicit BinaryExpressionAST(Token op, std::unique_ptr<ExpressionAST> lhs,
                                std::unique_ptr<ExpressionAST> rhs)
       : operator_{op}, lhs_{std::move(lhs)}, rhs_{std::move(rhs)} {}
+  Value *codegen() override {
+    auto *left = lhs_->codegen();
+    auto *right = rhs_->codegen();
+    if (!left || !right) {
+      return {};
+    }
+    switch (operator_) {
+    case ReservedToken::token_operator_add:
+      // Note: last param in `CreateFAdd` is `Twine` type:
+      // https://llvm.org/doxygen/classllvm_1_1Twine.html#details It's a faster
+      // representation of strings that uses a binary-tree instead of an array.
+      // See also: -
+      // https://www.geeksforgeeks.org/dsa/ropes-data-structure-fast-string-concatenation/
+      //           - https://stl.boost.org/Rope.html
+      return parser_ast.llvm_IR_builder_->CreateFAdd(left, right, "addtmp");
+    case ReservedToken::token_operator_subtract:
+      return parser_ast.llvm_IR_builder_->CreateFSub(left, right, "subtmp");
+    case ReservedToken::token_operator_multiply:
+      return parser_ast.llvm_IR_builder_->CreateFMul(left, right, "multmp");
+    case ReservedToken::token_operator_less:
+      // store cmp result in `left`s
+      left = parser_ast.llvm_IR_builder_->CreateFCmpULT(left, right, "cmptmp");
+      // convert result to double
+      return parser_ast.llvm_IR_builder_->CreateUIToFP(
+          left, Type::getDoubleTy(*parser_ast.llvm_context_), "booltmp");
+    default:
+      log_error("invalid binary operator");
+      return {};
+    }
+  }
 
 private:
-  Token operator_;
+  ReservedToken operator_;
   std::unique_ptr<ExpressionAST> lhs_, rhs_;
 };
 
@@ -63,6 +123,30 @@ public:
   explicit CallExpressionAST(
       std::string callee, std::vector<std::unique_ptr<ExpressionAST>> arguments)
       : callee_{std::move(callee)}, arguments_{std::move(arguments)} {}
+  Value *codegen() override {
+    // look up the name in the global module table
+    Function *function = parser_ast.llvm_module_->getFunction(callee_);
+    if (!function) {
+      log_error("unknown function referenced");
+      return {};
+    }
+
+    // if argument mismatch error
+    if (function->arg_size() != arguments_.size()) {
+      log_error("incorrect arguments size");
+      return {};
+    }
+
+    std::vector<Value *> arguments_values;
+    for (const auto &arg : arguments_) {
+      arguments_values.push_back(arg->codegen());
+    }
+    if (arguments_values.empty()) {
+      return {};
+    }
+    return parser_ast.llvm_IR_builder_->CreateCall(function, arguments_values,
+                                                   "calltmp");
+  }
 
 private:
   std::string callee_;
@@ -85,12 +169,6 @@ private:
   std::vector<std::string> arguments_names_;
 };
 
-static void log_error(const char *token) {
-  fprintf(stderr, "error: %s\n", token);
-}
-
-static void log_error_prototype(const char *token) { log_error(token); }
-
 /**
  * This class represents a function definition itself.
  */
@@ -104,6 +182,16 @@ private:
   std::unique_ptr<FunctionPrototypeAST> prototype_;
   std::unique_ptr<ExpressionAST> body_;
 };
+
+ParserAST::ParserAST()
+    : llvm_context_{std::make_unique<LLVMContext>()},
+      llvm_IR_builder_{std::make_unique<IRBuilder<>>(*llvm_context_)},
+      llvm_module_{std::make_unique<Module>("global_module", *llvm_context_)} {}
+
+ParserAST &ParserAST::instance() {
+  static std::unique_ptr<ParserAST> instance{new ParserAST()};
+  return *instance;
+}
 
 std::unique_ptr<ExpressionAST> ParserAST::parse_number_expression() {
   auto result = std::make_unique<NumberExpressionAST>(lexer_.number_value_);

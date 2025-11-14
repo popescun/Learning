@@ -7,6 +7,11 @@
 
 #include "lexer.hpp"
 
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Value.h>
+
 #include <memory>
 
 /**
@@ -19,7 +24,21 @@ class ExpressionAST;
 class FunctionPrototypeAST;
 class FunctionDefinitionAST;
 
+/**
+ * AST parser as single-tone.
+ */
 struct ParserAST {
+  /**
+   * Constructor.
+   */
+  ParserAST();
+
+  /**
+   * Get single-tone parecer instance.
+   * @return
+   */
+  static ParserAST &instance();
+
   /**
    * Parse a number expression with syntax:
    *   numberexpr ::= number
@@ -114,6 +133,10 @@ struct ParserAST {
   void main_loop();
 
   Lexer lexer_;
+  std::unique_ptr<llvm::LLVMContext> llvm_context_;
+  std::unique_ptr<llvm::IRBuilder<>> llvm_IR_builder_;
+  std::unique_ptr<llvm::Module> llvm_module_;
+  std::map<std::string, llvm::Value *> function_parameters_;
 };
 
 } // namespace toy

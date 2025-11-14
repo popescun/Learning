@@ -27,6 +27,10 @@ enum class ReservedToken : Token {
   token_whitespace = ' ',
   token_leading_parenthesis = '(',
   token_semicolon = ';',
+  token_operator_add = '+',
+  token_operator_subtract = '-',
+  token_operator_multiply = '*',
+  token_operator_less = '<',
   token_unknown = -6
 };
 
