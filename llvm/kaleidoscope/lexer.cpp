@@ -26,6 +26,11 @@ void Lexer::next_token() {
       return;
     }
 
+    if (identifier_ == "exit") {
+      current_token_ = to_token(ReservedToken::token_exit);
+      return;
+    }
+
     if (identifier_ == "extern") {
       current_token_ = to_token(ReservedToken::token_external_function);
       return;

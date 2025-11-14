@@ -136,7 +136,7 @@ struct ParserAST {
   std::unique_ptr<llvm::LLVMContext> llvm_context_;
   std::unique_ptr<llvm::IRBuilder<>> llvm_IR_builder_;
   std::unique_ptr<llvm::Module> llvm_module_;
-  std::map<std::string, llvm::Value *> function_parameters_;
+  std::map<std::string, llvm::Value *> function_arguments_;
 };
 
 } // namespace toy

@@ -30,13 +30,19 @@ ParserAST &parser_ast = ParserAST::instance();
 } // namespace
 
 using Token = Token;
+
+class IRCode {
+public:
+  virtual ~IRCode() = default;
+  virtual Value *generate_IR_code() = 0;
+};
+
 /**
  *  Base class for all expression nodes.
  */
-class ExpressionAST {
+class ExpressionAST : public IRCode {
 public:
-  virtual ~ExpressionAST() = default;
-  virtual llvm::Value *codegen() = 0;
+  ~ExpressionAST() override = default;
 };
 
 /**
@@ -45,7 +51,7 @@ public:
 class NumberExpressionAST final : public ExpressionAST {
 public:
   explicit NumberExpressionAST(double value) : value_{value} {}
-  Value *codegen() override {
+  Value *generate_IR_code() override {
     return ConstantFP::get(*parser_ast.llvm_context_, APFloat(value_));
   }
 
@@ -59,8 +65,8 @@ private:
 class VariableExpressionAST final : public ExpressionAST {
 public:
   explicit VariableExpressionAST(std::string name) : name_{std::move(name)} {}
-  Value *codegen() override {
-    auto *variable = parser_ast.function_parameters_[name_];
+  Value *generate_IR_code() override {
+    auto *variable = parser_ast.function_arguments_[name_];
     if (!variable) {
       log_error("unknown variable name");
       return {};
@@ -79,9 +85,9 @@ public:
   explicit BinaryExpressionAST(Token op, std::unique_ptr<ExpressionAST> lhs,
                                std::unique_ptr<ExpressionAST> rhs)
       : operator_{op}, lhs_{std::move(lhs)}, rhs_{std::move(rhs)} {}
-  Value *codegen() override {
-    auto *left = lhs_->codegen();
-    auto *right = rhs_->codegen();
+  Value *generate_IR_code() override {
+    auto *left = lhs_->generate_IR_code();
+    auto *right = rhs_->generate_IR_code();
     if (!left || !right) {
       return {};
     }
@@ -123,7 +129,7 @@ public:
   explicit CallExpressionAST(
       std::string callee, std::vector<std::unique_ptr<ExpressionAST>> arguments)
       : callee_{std::move(callee)}, arguments_{std::move(arguments)} {}
-  Value *codegen() override {
+  Value *generate_IR_code() override {
     // look up the name in the global module table
     Function *function = parser_ast.llvm_module_->getFunction(callee_);
     if (!function) {
@@ -139,7 +145,7 @@ public:
 
     std::vector<Value *> arguments_values;
     for (const auto &arg : arguments_) {
-      arguments_values.push_back(arg->codegen());
+      arguments_values.push_back(arg->generate_IR_code());
     }
     if (arguments_values.empty()) {
       return {};
@@ -158,11 +164,34 @@ private:
  * name, and its argument names (thus implicitly the number of arguments the
  * function takes).
  */
-class FunctionPrototypeAST {
+class FunctionPrototypeAST : IRCode {
 public:
   FunctionPrototypeAST(std::string name,
                        std::vector<std::string> arguments_names)
       : name_{std::move(name)}, arguments_names_{std::move(arguments_names)} {}
+  // Note that llvm `Function` is a `Value` sub-class.
+  Function *generate_IR_code() override {
+    // make the function type: double(double, double) etc.
+    const std::vector<Type *> arguments_types{
+        arguments_names_.size(), Type::getDoubleTy(*parser_ast.llvm_context_)};
+    // This doc needs clarification: "Note that Types in LLVM are uniqued just
+    // like Constants are, so you don’t “new” a type, you “get” it."
+    // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl03.html#function-code-generation
+    FunctionType *function_type = FunctionType::get(
+        Type::getDoubleTy(*parser_ast.llvm_context_), arguments_types, false);
+    Function *function =
+        Function::Create(function_type, Function::ExternalLinkage, name_,
+                         parser_ast.llvm_module_.get());
+    // set names for all arguments
+    std::uint32_t idx{0};
+    for (auto &arg : function->args()) {
+      arg.setName(arguments_names_[idx++]);
+    }
+
+    return function;
+  }
+
+  [[nodiscard]] const std::string &name() const { return name_; }
 
 private:
   std::string name_;
@@ -172,11 +201,85 @@ private:
 /**
  * This class represents a function definition itself.
  */
-class FunctionDefinitionAST {
+class FunctionDefinitionAST : public IRCode {
 public:
   FunctionDefinitionAST(std::unique_ptr<FunctionPrototypeAST> prototype,
                         std::unique_ptr<ExpressionAST> body)
       : prototype_{std::move(prototype)}, body_{std::move(body)} {}
+
+  /**
+   * todo: This code does have a bug, though:
+   * If the FunctionAST::codegen() method finds an existing IR Function, it does
+   * not validate its signature against the definition’s own prototype. This
+   * means that an earlier ‘extern’ declaration will take precedence over the
+   * function definition’s signature, which can cause codegen to fail, for
+   * instance if the function arguments are named differently. There are a
+   * number of ways to fix this bug, see what you can come up with! Here is a
+   * testcase:
+   *     - extern foo(a);     # ok, defines foo.
+   *     - def foo(b) b;      # Error: Unknown variable name. (decl using 'a'
+   * takes precedence).
+   */
+  Function *generate_IR_code() override {
+    // first, check for existing function from previous `extern` declaration
+    // todo: does it regard all functions added to this module, not only
+    // `extern` ones?
+    Function *function =
+        parser_ast.llvm_module_->getFunction(prototype_->name());
+    if (function) {
+      log_error("function cannot be redefined");
+      return {};
+    }
+    function = prototype_->generate_IR_code();
+    if (!function) {
+      log_error("function cannot generate IR code");
+      return {};
+    }
+    // `empty()` here means there is no function body yet
+    if (!function->empty()) {
+      log_error("function generated IR code is empty");
+      return {};
+    }
+
+    // create a new basic block(body) to start insertion into
+    BasicBlock *basic_block =
+        BasicBlock::Create(*parser_ast.llvm_context_, "begin", function);
+    // from doc: This specifies that created instructions should be appended to
+    // the end of the specified block.
+    parser_ast.llvm_IR_builder_->SetInsertPoint(basic_block);
+
+    // record the function arguments in the function parameters map.
+    // todo: how global `function_arguments_` could be moved locally to a
+    // function definition?
+    parser_ast.function_arguments_.clear();
+    for (auto &arg : function->args()) {
+      parser_ast.function_arguments_[std::string{arg.getName()}] = &arg;
+    }
+
+    Value *body_value = body_->generate_IR_code();
+    if (!body_value) {
+      log_error("function body generated IR code failed");
+      function->eraseFromParent();
+      return {};
+    }
+
+    // finish off the function
+    Value *ret_value = parser_ast.llvm_IR_builder_->CreateRet(body_value);
+    if (!ret_value) {
+      log_error("function create ret failed");
+      function->eraseFromParent();
+      return {};
+    }
+
+    // validate the generated code, checking for consistency
+    if (verifyFunction(*function, &errs())) {
+      log_error("function verification failed");
+      function->eraseFromParent();
+      return {};
+    }
+
+    return function;
+  }
 
 private:
   std::unique_ptr<FunctionPrototypeAST> prototype_;
@@ -387,8 +490,12 @@ std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_external() {
 }
 
 void ParserAST::handle_function_definition() {
-  if (parse_function_definition()) {
-    fprintf(stderr, "parsed a function definition\n");
+  if (auto function_definition = parse_function_definition()) {
+    if (auto *ir_code = function_definition->generate_IR_code()) {
+      fprintf(stderr, "parsed a function definition\n");
+      ir_code->print(errs());
+      fprintf(stderr, "\n");
+    }
   } else {
     // skip token for error recovery
     lexer_.next_token();
@@ -396,8 +503,12 @@ void ParserAST::handle_function_definition() {
 }
 
 void ParserAST::handle_extern() {
-  if (parse_external()) {
-    fprintf(stderr, "parsed an external function\n");
+  if (auto function_prototype = parse_external()) {
+    if (auto *ir_code = function_prototype->generate_IR_code()) {
+      fprintf(stderr, "parsed an external function\n");
+      ir_code->print(errs());
+      fprintf(stderr, "\n");
+    }
   } else {
     // skip token for error recovery
     lexer_.next_token();
@@ -405,8 +516,18 @@ void ParserAST::handle_extern() {
 }
 
 void ParserAST::handle_top_level_expression() {
-  if (parse_top_level_expression()) {
-    fprintf(stderr, "parsed a top level expression\n");
+  // evaluate a top-level expression into anonymous function
+  if (auto function_definition = parse_top_level_expression()) {
+    if (auto *ir_code = function_definition->generate_IR_code()) {
+      fprintf(stderr, "parsed a top level expression\n");
+      ir_code->print(errs());
+      fprintf(stderr, "\n");
+
+      // todo: fix, this removes the IR code from module, so is not printed on
+      // `dump()`
+      //  remove the anonymous expression
+      ir_code->eraseFromParent();
+    }
   } else {
     // skip token for error recovery
     lexer_.next_token();
@@ -433,6 +554,10 @@ void ParserAST::main_loop() {
     case ReservedToken::token_external_function:
       handle_extern();
       break;
+    case ReservedToken::token_exit:
+      fprintf(stderr, "dump module\n");
+      parser_ast.llvm_module_->dump();
+      return;
     default:
       handle_top_level_expression();
       break;

@@ -31,7 +31,8 @@ enum class ReservedToken : Token {
   token_operator_subtract = '-',
   token_operator_multiply = '*',
   token_operator_less = '<',
-  token_unknown = -6
+  token_exit = -6,
+  token_unknown = -7
 };
 
 /**
