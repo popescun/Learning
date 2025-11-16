@@ -325,7 +325,8 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
   lexer_.next_token();
 
   // simple variable reference
-  if (lexer_.current_token_ != '(') {
+  if (lexer_.current_token_ !=
+      Lexer::to_token(ReservedToken::token_leading_parenthesis)) {
     return std::make_unique<VariableExpressionAST>(id_name);
   }
 
@@ -333,7 +334,8 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
   // eat opening '('
   lexer_.next_token();
   std::vector<std::unique_ptr<ExpressionAST>> arguments;
-  if (lexer_.current_token_ != ')') {
+  if (lexer_.current_token_ !=
+      Lexer::to_token(ReservedToken::token_trailing_parenthesis)) {
     while (true) {
       if (auto argument = parse_primary_expression()) {
         arguments.push_back(std::move(argument));
@@ -341,11 +343,13 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
         return {};
       }
 
-      if (lexer_.current_token_ == ')') {
+      if (lexer_.current_token_ ==
+          Lexer::to_token(ReservedToken::token_trailing_parenthesis)) {
         break;
       }
 
-      if (lexer_.current_token_ != ',') {
+      if (lexer_.current_token_ !=
+          Lexer::to_token(ReservedToken::token_comma)) {
         log_error("expected ')' or ',' in argument list");
         return {};
       }
@@ -432,23 +436,46 @@ std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_function_prototype() {
   auto function_name = lexer_.identifier_;
   lexer_.next_token();
 
-  if (lexer_.current_token_ != '(') {
+  if (lexer_.current_token_ !=
+      Lexer::to_token(ReservedToken::token_leading_parenthesis)) {
     log_error_prototype("expected '(' in prototype");
     return {};
   }
 
+  // eat leading '('
+  lexer_.next_token();
+
   std::vector<std::string> arguments_names;
-  while (lexer_.get_next_token() ==
-         Lexer::to_token(ReservedToken::token_identifier)) {
-    arguments_names.push_back(lexer_.identifier_);
-  }
-  if (lexer_.current_token_ != ')') {
-    log_error_prototype("expected ')' in prototype");
-    return {};
+  if (lexer_.current_token_ !=
+      Lexer::to_token(ReservedToken::token_trailing_parenthesis)) {
+    while (true) {
+      if (auto expression = parse_identifier_expression()) {
+        const auto *variable =
+            dynamic_cast<VariableExpressionAST *>(expression.get());
+        if (!variable) {
+          log_error(" ExpressionAST to VariableExpressionAST cast failed");
+          return {};
+        }
+        arguments_names.push_back(variable->name_);
+      } else {
+        return {};
+      }
+
+      if (lexer_.current_token_ ==
+          Lexer::to_token(ReservedToken::token_trailing_parenthesis)) {
+        break;
+      }
+
+      if (lexer_.current_token_ !=
+          Lexer::to_token(ReservedToken::token_comma)) {
+        log_error("expected ')' or ',' in argument list");
+        return {};
+      }
+      lexer_.next_token();
+    }
   }
 
-  // success
-  // eat ')'
+  // eat ending ')'
   lexer_.next_token();
 
   return std::make_unique<FunctionPrototypeAST>(function_name,
@@ -459,11 +486,13 @@ std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_function_definition() {
   // eat 'def'
   lexer_.next_token();
 
+  // signature
   auto function_prototype = parse_function_prototype();
   if (!function_prototype) {
     return {};
   }
 
+  // building block
   if (auto expression = parse_expression()) {
     return std::make_unique<FunctionDefinitionAST>(
         std::move(function_prototype), std::move(expression));
@@ -496,10 +525,11 @@ void ParserAST::handle_function_definition() {
       ir_code->print(errs());
       fprintf(stderr, "\n");
     }
-  } else {
-    // skip token for error recovery
-    lexer_.next_token();
   }
+  // else {
+  //   // skip token for error recovery
+  //   lexer_.next_token();
+  // }
 }
 
 void ParserAST::handle_extern() {
@@ -545,6 +575,7 @@ void ParserAST::main_loop() {
       return;
     // ignore top-level semicolon
     case ReservedToken::token_semicolon:
+    case ReservedToken::token_new_line:
       fprintf(stderr, "toy> ");
       lexer_.next_token();
       break;
