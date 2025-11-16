@@ -21,10 +21,59 @@ llvm_map_components_to_libnames(llvm_libs
   bitstreamreader
   binaryformat
   targetparser
+  analysis
+  irprinter
+  passes
+  codegen
+  transformutils
+  mc
+  profiledata
+  cgdata
+  debuginfodwarf
+  debuginfodwarflowlevel
+  bitreader
+  object
+  mcparser
+  irreader
+  asmparser
+  bitwriter
+  ipo
+  scalaropts
+  target
+  objcarcopts
+  codegentypes
+  textapi
+  instcombine
+  cfguard
+  instrumentation
+  coroutines
+  frontendopenmp
+  frontendatomic
+  frontendoffloading
+  vectorize
+  hipstdpar
+  aggressiveinstcombine
+  globalisel
+  frontendhlsl
+  objectyaml
+  linker
+  sandboxir
 )
 
-#find_package(LLVM REQUIRED CONFIG)
+#include(/opt/homebrew/Cellar/llvm@18/18.1.8/lib/cmake/llvm/LLVMConfig.cmake)
+#find_package(LLVM REQUIRED)
+
 find_package(benchmark REQUIRED)
+include(/opt/homebrew/Cellar/zstd/1.5.7/lib/cmake/zstd/zstdConfig.cmake)
+find_package(ZSTD REQUIRED STATIC)
+if (!ZSTD_FOUND)
+  message(FATAL_ERROR "zstd not found")
+endif ()
+
+find_package(ZLIB REQUIRED)
+if (!ZLIB_FOUND)
+  message(FATAL_ERROR "zlib not found")
+endif ()
 
 file(GLOB headers *.hpp)
 file(GLOB cpp_files *.cpp)
@@ -36,4 +85,6 @@ add_executable(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
   ${llvm_libs}
   benchmark::benchmark
+  zstd::libzstd_shared
+  ${ZLIB_LIBRARY}
 )

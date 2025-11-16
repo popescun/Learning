@@ -7,10 +7,15 @@
 
 #include "lexer.hpp"
 
+#include <llvm/Analysis/CGSCCPassManager.h>
+#include <llvm/Analysis/LoopAnalysisManager.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/PassInstrumentation.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Passes/StandardInstrumentations.h>
 
 #include <memory>
 
@@ -137,6 +142,17 @@ struct ParserAST {
   std::unique_ptr<llvm::IRBuilder<>> llvm_IR_builder_;
   std::unique_ptr<llvm::Module> llvm_module_;
   std::map<std::string, llvm::Value *> function_arguments_;
+  // std::map<std::string, std::unique_ptr<FunctionPrototypeAST>>
+  // function_prototypes_;
+
+  std::unique_ptr<llvm::FunctionPassManager> function_pass_manager_;
+  std::unique_ptr<llvm::LoopAnalysisManager> loop_analysis_manager_;
+  std::unique_ptr<llvm::FunctionAnalysisManager> function_analysis_manager_;
+  std::unique_ptr<llvm::CGSCCAnalysisManager> cgscc_analysis_manager_;
+  std::unique_ptr<llvm::ModuleAnalysisManager> module_analysis_manager_;
+  std::unique_ptr<llvm::PassInstrumentationCallbacks>
+      pass_instrumentation_callbacks_;
+  std::unique_ptr<llvm::StandardInstrumentations> standard_instrumentations_;
 };
 
 } // namespace toy

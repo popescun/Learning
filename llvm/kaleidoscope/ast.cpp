@@ -5,13 +5,17 @@
 #include "ast.hpp"
 
 #include <llvm/ADT/APFloat.h>
-#include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/Transforms/Scalar/Reassociate.h>
+#include <llvm/Transforms/Scalar/SimplifyCFG.h>
 
 #include <string>
 #include <utility>
@@ -278,6 +282,9 @@ public:
       return {};
     }
 
+    parser_ast.function_pass_manager_->run(
+        *function, *parser_ast.function_analysis_manager_);
+
     return function;
   }
 
@@ -289,7 +296,35 @@ private:
 ParserAST::ParserAST()
     : llvm_context_{std::make_unique<LLVMContext>()},
       llvm_IR_builder_{std::make_unique<IRBuilder<>>(*llvm_context_)},
-      llvm_module_{std::make_unique<Module>("global_module", *llvm_context_)} {}
+      llvm_module_{std::make_unique<Module>("global_module", *llvm_context_)},
+      function_pass_manager_{std::make_unique<FunctionPassManager>()},
+      loop_analysis_manager_{std::make_unique<LoopAnalysisManager>()},
+      function_analysis_manager_{std::make_unique<FunctionAnalysisManager>()},
+      cgscc_analysis_manager_{std::make_unique<CGSCCAnalysisManager>()},
+      module_analysis_manager_{std::make_unique<ModuleAnalysisManager>()},
+      pass_instrumentation_callbacks_{
+          std::make_unique<PassInstrumentationCallbacks>()},
+      standard_instrumentations_{
+          std::make_unique<StandardInstrumentations>(*llvm_context_, true)} {
+  standard_instrumentations_->registerCallbacks(
+      *pass_instrumentation_callbacks_, module_analysis_manager_.get());
+
+  // add transform passes
+  function_pass_manager_->addPass(InstCombinePass());
+  // reassociate expression
+  function_pass_manager_->addPass(ReassociatePass());
+  // eliminate common sub-expression
+  function_pass_manager_->addPass(GVNPass());
+  // simplify the control flow graph (deleting unreachable blocks, etc).
+  function_pass_manager_->addPass(SimplifyCFGPass());
+
+  PassBuilder pass_builder;
+  pass_builder.registerModuleAnalyses(*module_analysis_manager_);
+  pass_builder.registerFunctionAnalyses(*function_analysis_manager_);
+  pass_builder.crossRegisterProxies(
+      *loop_analysis_manager_, *function_analysis_manager_,
+      *cgscc_analysis_manager_, *module_analysis_manager_);
+}
 
 ParserAST &ParserAST::instance() {
   static std::unique_ptr<ParserAST> instance{new ParserAST()};
@@ -413,8 +448,8 @@ ParserAST::parse_binary_operation_rhs(Token expression_precedence,
       }
     }
 
-    lhs = std::make_unique<BinaryExpressionAST>(binary_op, std::move(rhs),
-                                                std::move(lhs));
+    lhs = std::make_unique<BinaryExpressionAST>(binary_op, std::move(lhs),
+                                                std::move(rhs));
   }
 }
 
