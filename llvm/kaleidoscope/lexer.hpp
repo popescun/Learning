@@ -97,6 +97,7 @@ struct Lexer {
   // Install standard binary operators, first has the lowest precedence.
   BinaryOperationPrecedence binary_op_precedence_ = {
       {'<', 10}, {'+', 20}, {'-', 20}, {'*', 40}};
+  // track where current token position
   std::uint32_t row_{1};
   std::uint32_t col_{0};
 };

@@ -344,7 +344,7 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_number_expression() {
 std::unique_ptr<ExpressionAST> ParserAST::parse_parenthesis_expression() {
   // eat opening '('
   lexer_.next_token();
-  auto expression = parse_primary_expression();
+  auto expression = parse_expression();
   if (!expression) {
     return {};
   }
