@@ -315,8 +315,12 @@ ParserAST::ParserAST(Jit &jit) : jit_{jit} { init(); }
 
 void ParserAST::init() {
   llvm_context_ = std::make_unique<LLVMContext>();
+  llvm_module_ =
+      std::make_unique<Module>(std::string("ToyJIT"), *llvm_context_);
+  llvm_module_->setDataLayout(jit_.data_layout_);
+
   llvm_IR_builder_ = std::make_unique<IRBuilder<>>(*llvm_context_);
-  llvm_module_ = std::make_unique<Module>("ToyJIT", *llvm_context_);
+
   function_pass_manager_ = std::make_unique<FunctionPassManager>();
   loop_analysis_manager_ = std::make_unique<LoopAnalysisManager>();
   function_analysis_manager_ = std::make_unique<FunctionAnalysisManager>();
@@ -326,8 +330,6 @@ void ParserAST::init() {
       std::make_unique<PassInstrumentationCallbacks>();
   standard_instrumentations_ =
       std::make_unique<StandardInstrumentations>(*llvm_context_, true);
-
-  llvm_module_->setDataLayout(jit_.data_layout_);
 
   standard_instrumentations_->registerCallbacks(
       *pass_instrumentation_callbacks_, module_analysis_manager_.get());
@@ -596,9 +598,18 @@ void ParserAST::handle_function_definition() {
       fprintf(stderr, "parsed a function definition\n");
       ir_code->print(errs());
       fprintf(stderr, "\n");
-      ExitOnErr(jit_.addModule(
-          ThreadSafeModule(std::move(llvm_module_), std::move(llvm_context_))));
+      const auto resource_tracker = jit_.jit_dylib_.createResourceTracker();
+      auto thread_safe_module =
+          ThreadSafeModule(std::move(llvm_module_), std::move(llvm_context_));
+      ExitOnErr(
+          jit_.addModule(std::move(thread_safe_module), resource_tracker));
       init();
+      // todo: we can also search if the symbol was added, like for anonymous
+      // calls todo:  fix this must be done before same symbol is added again,
+      // otherwise this error:
+      //     In ToyJIT, duplicate definition of symbol '_test'
+      //  delete the anonymous expression module from Jit
+      //  ExitOnErr(resource_tracker->remove());
     }
   }
   // else {
@@ -613,6 +624,8 @@ void ParserAST::handle_extern() {
       fprintf(stderr, "parsed an external function\n");
       ir_code->print(errs());
       fprintf(stderr, "\n");
+      function_prototypes[function_prototype->name()] =
+          std::move(function_prototype);
     }
   } else {
     // skip token for error recovery
@@ -624,8 +637,11 @@ void ParserAST::handle_top_level_expression() {
   // evaluate a top-level expression into anonymous function
   if (const auto function_definition = parse_top_level_expression()) {
     if (auto *ir_code = function_definition->generate_IR_code()) {
+      fprintf(stderr, "parsed a top level expression\n");
+      ir_code->print(errs());
+      fprintf(stderr, "\n");
       // create a `ResourceTracker` to track JIT'd memory allocated to our
-      // anonymous expression -- that way we can free it after executing.
+      // anonymous expression, that way we can free it after executing.
       const auto resource_tracker = jit_.jit_dylib_.createResourceTracker();
       auto thread_safe_module =
           ThreadSafeModule(std::move(llvm_module_), std::move(llvm_context_));
@@ -644,10 +660,6 @@ void ParserAST::handle_top_level_expression() {
 
       // delete the anonymous expression module from Jit
       ExitOnErr(resource_tracker->remove());
-
-      // fprintf(stderr, "parsed a top level expression\n");
-      // ir_code->print(errs());
-      // fprintf(stderr, "\n");
       //
       // // todo: fix, this removes the IR code, so is not printed on `dump()`
       // //  remove the anonymous expression
