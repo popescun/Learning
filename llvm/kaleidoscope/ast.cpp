@@ -26,11 +26,15 @@ namespace toy {
 using namespace llvm;
 
 namespace {
-void log_error(const char *token) { fprintf(stderr, "error: %s\n", token); }
-
-void log_error_prototype(const char *token) { log_error(token); }
 
 ParserAST &parser_ast = ParserAST::instance();
+
+void log_error(const char *token) {
+  fprintf(stderr, "error: %s at row %d, col %d\n", token,
+          parser_ast.lexer_.row_, parser_ast.lexer_.col_);
+}
+
+void log_error_prototype(const char *token) { log_error(token); }
 } // namespace
 
 using Token = Token;

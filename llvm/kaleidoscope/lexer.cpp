@@ -7,7 +7,16 @@
 namespace toy {
 
 void Lexer::next_token() {
-  auto get_char = []() -> Token { return static_cast<Token>(std::getchar()); };
+  auto get_char = [this]() -> Token {
+    const auto c = static_cast<Token>(std::getchar());
+    if (c == to_token(ReservedToken::token_new_line)) {
+      col_ = 0;
+      ++row_;
+    } else {
+      ++col_;
+    }
+    return c;
+  };
 
   // skip any whitespace
   while (isspace(next_token_)) {
@@ -69,6 +78,11 @@ void Lexer::next_token() {
   if (next_token_ == EOF) {
     current_token_ = to_token(ReservedToken::token_eof);
     return;
+  }
+
+  if (next_token_ == to_token(ReservedToken::token_number)) {
+    ++row_;
+    col_ = 0;
   }
 
   // otherwise, just return the character as its ascii value
