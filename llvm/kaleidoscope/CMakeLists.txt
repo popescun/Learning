@@ -58,6 +58,21 @@ llvm_map_components_to_libnames(llvm_libs
   objectyaml
   linker
   sandboxir
+  executionengine
+  runtimedyld
+  orcjit
+  orcshared
+  jitlink
+  option
+  orctargetprocess
+  aarch64asmparser
+  aarch64codegen
+  aarch64info
+  aarch64desc
+  aarch64utils
+  asmprinter
+  selectiondag
+  debuginfocodeview
 )
 
 #include(/opt/homebrew/Cellar/llvm@18/18.1.8/lib/cmake/llvm/LLVMConfig.cmake)

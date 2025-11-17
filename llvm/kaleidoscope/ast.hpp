@@ -29,6 +29,8 @@ class ExpressionAST;
 class FunctionPrototypeAST;
 class FunctionDefinitionAST;
 
+struct Jit;
+
 /**
  * AST parser as single-tone.
  */
@@ -36,13 +38,9 @@ struct ParserAST {
   /**
    * Constructor.
    */
-  ParserAST();
+  explicit ParserAST(Jit &jit);
 
-  /**
-   * Get single-tone parecer instance.
-   * @return
-   */
-  static ParserAST &instance();
+  void init();
 
   /**
    * Parse a number expression with syntax:
@@ -130,6 +128,8 @@ struct ParserAST {
   void handle_function_definition();
   void handle_extern();
   void handle_top_level_expression();
+  void log_error(const char *token) const;
+  void log_error_prototype(const char *token) const;
 
   /**
    * Handle input expressions with syntax:
@@ -153,6 +153,7 @@ struct ParserAST {
   std::unique_ptr<llvm::PassInstrumentationCallbacks>
       pass_instrumentation_callbacks_;
   std::unique_ptr<llvm::StandardInstrumentations> standard_instrumentations_;
+  Jit &jit_;
 };
 
 } // namespace toy

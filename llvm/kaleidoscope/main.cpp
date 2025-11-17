@@ -1,9 +1,10 @@
 #include <iostream>
 #include <ostream>
 
-#include "ast.hpp"
+#include "jit.hpp"
 
 int main() {
-  toy::ParserAST::instance().run();
+  auto jit = toy::Jit::create();
+  jit->run();
   return 0;
 }

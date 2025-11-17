@@ -3,8 +3,10 @@
 //
 
 #include "ast.hpp"
+#include "jit.hpp"
 
 #include <llvm/ADT/APFloat.h>
+#include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
@@ -24,17 +26,14 @@
 namespace toy {
 
 using namespace llvm;
+using namespace llvm::orc;
 
 namespace {
 
-ParserAST &parser_ast = ParserAST::instance();
+ExitOnError ExitOnErr;
 
-void log_error(const char *token) {
-  fprintf(stderr, "error: %s at row %d, col %d\n", token,
-          parser_ast.lexer_.row_, parser_ast.lexer_.col_);
-}
+constexpr auto kAnonymousExpression{"__anon_expr"};
 
-void log_error_prototype(const char *token) { log_error(token); }
 } // namespace
 
 using Token = Token;
@@ -58,13 +57,15 @@ public:
  */
 class NumberExpressionAST final : public ExpressionAST {
 public:
-  explicit NumberExpressionAST(double value) : value_{value} {}
+  explicit NumberExpressionAST(const ParserAST &parser_ast, double value)
+      : parser_ast_{parser_ast}, value_{value} {}
   Value *generate_IR_code() override {
-    return ConstantFP::get(*parser_ast.llvm_context_, APFloat(value_));
+    return ConstantFP::get(*parser_ast_.llvm_context_, APFloat(value_));
   }
 
 private:
   double value_;
+  const ParserAST &parser_ast_;
 };
 
 /**
@@ -72,17 +73,19 @@ private:
  */
 class VariableExpressionAST final : public ExpressionAST {
 public:
-  explicit VariableExpressionAST(std::string name) : name_{std::move(name)} {}
+  explicit VariableExpressionAST(ParserAST &parser_ast, std::string name)
+      : parser_ast_{parser_ast}, name_{std::move(name)} {}
   Value *generate_IR_code() override {
-    auto *variable = parser_ast.function_arguments_[name_];
+    auto *variable = parser_ast_.function_arguments_[name_];
     if (!variable) {
-      log_error("unknown variable name");
+      parser_ast_.log_error("unknown variable name");
       return {};
     }
     return variable;
   }
 
   std::string name_;
+  ParserAST &parser_ast_;
 };
 
 /**
@@ -90,9 +93,11 @@ public:
  */
 class BinaryExpressionAST final : public ExpressionAST {
 public:
-  explicit BinaryExpressionAST(Token op, std::unique_ptr<ExpressionAST> lhs,
+  explicit BinaryExpressionAST(const ParserAST &parser_ast, Token op,
+                               std::unique_ptr<ExpressionAST> lhs,
                                std::unique_ptr<ExpressionAST> rhs)
-      : operator_{op}, lhs_{std::move(lhs)}, rhs_{std::move(rhs)} {}
+      : parser_ast_{parser_ast}, operator_{op}, lhs_{std::move(lhs)},
+        rhs_{std::move(rhs)} {}
   Value *generate_IR_code() override {
     auto *left = lhs_->generate_IR_code();
     auto *right = rhs_->generate_IR_code();
@@ -107,19 +112,19 @@ public:
       // See also: -
       // https://www.geeksforgeeks.org/dsa/ropes-data-structure-fast-string-concatenation/
       //           - https://stl.boost.org/Rope.html
-      return parser_ast.llvm_IR_builder_->CreateFAdd(left, right, "addtmp");
+      return parser_ast_.llvm_IR_builder_->CreateFAdd(left, right, "addtmp");
     case ReservedToken::token_operator_subtract:
-      return parser_ast.llvm_IR_builder_->CreateFSub(left, right, "subtmp");
+      return parser_ast_.llvm_IR_builder_->CreateFSub(left, right, "subtmp");
     case ReservedToken::token_operator_multiply:
-      return parser_ast.llvm_IR_builder_->CreateFMul(left, right, "multmp");
+      return parser_ast_.llvm_IR_builder_->CreateFMul(left, right, "multmp");
     case ReservedToken::token_operator_less:
       // store cmp result in `left`s
-      left = parser_ast.llvm_IR_builder_->CreateFCmpULT(left, right, "cmptmp");
+      left = parser_ast_.llvm_IR_builder_->CreateFCmpULT(left, right, "cmptmp");
       // convert result to double
-      return parser_ast.llvm_IR_builder_->CreateUIToFP(
-          left, Type::getDoubleTy(*parser_ast.llvm_context_), "booltmp");
+      return parser_ast_.llvm_IR_builder_->CreateUIToFP(
+          left, Type::getDoubleTy(*parser_ast_.llvm_context_), "booltmp");
     default:
-      log_error("invalid binary operator");
+      parser_ast_.log_error("invalid binary operator");
       return {};
     }
   }
@@ -127,6 +132,7 @@ public:
 private:
   ReservedToken operator_;
   std::unique_ptr<ExpressionAST> lhs_, rhs_;
+  const ParserAST &parser_ast_;
 };
 
 /**
@@ -135,19 +141,21 @@ private:
 class CallExpressionAST final : public ExpressionAST {
 public:
   explicit CallExpressionAST(
-      std::string callee, std::vector<std::unique_ptr<ExpressionAST>> arguments)
-      : callee_{std::move(callee)}, arguments_{std::move(arguments)} {}
+      const ParserAST &parser_ast, std::string callee,
+      std::vector<std::unique_ptr<ExpressionAST>> arguments)
+      : parser_ast_{parser_ast}, callee_{std::move(callee)},
+        arguments_{std::move(arguments)} {}
   Value *generate_IR_code() override {
     // look up the name in the global module table
-    Function *function = parser_ast.llvm_module_->getFunction(callee_);
+    Function *function = parser_ast_.llvm_module_->getFunction(callee_);
     if (!function) {
-      log_error("unknown function referenced");
+      parser_ast_.log_error("unknown function referenced");
       return {};
     }
 
     // if argument mismatch error
     if (function->arg_size() != arguments_.size()) {
-      log_error("incorrect arguments size");
+      parser_ast_.log_error("incorrect arguments size");
       return {};
     }
 
@@ -158,13 +166,14 @@ public:
     if (arguments_values.empty()) {
       return {};
     }
-    return parser_ast.llvm_IR_builder_->CreateCall(function, arguments_values,
-                                                   "calltmp");
+    return parser_ast_.llvm_IR_builder_->CreateCall(function, arguments_values,
+                                                    "calltmp");
   }
 
 private:
   std::string callee_;
   std::vector<std::unique_ptr<ExpressionAST>> arguments_;
+  const ParserAST &parser_ast_;
 };
 
 /**
@@ -174,22 +183,23 @@ private:
  */
 class FunctionPrototypeAST : IRCode {
 public:
-  FunctionPrototypeAST(std::string name,
+  FunctionPrototypeAST(const ParserAST &parser_ast, std::string name,
                        std::vector<std::string> arguments_names)
-      : name_{std::move(name)}, arguments_names_{std::move(arguments_names)} {}
+      : parser_ast_{parser_ast}, name_{std::move(name)},
+        arguments_names_{std::move(arguments_names)} {}
   // Note that llvm `Function` is a `Value` sub-class.
   Function *generate_IR_code() override {
     // make the function type: double(double, double) etc.
     const std::vector<Type *> arguments_types{
-        arguments_names_.size(), Type::getDoubleTy(*parser_ast.llvm_context_)};
+        arguments_names_.size(), Type::getDoubleTy(*parser_ast_.llvm_context_)};
     // This doc needs clarification: "Note that Types in LLVM are uniqued just
     // like Constants are, so you don’t “new” a type, you “get” it."
     // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl03.html#function-code-generation
     FunctionType *function_type = FunctionType::get(
-        Type::getDoubleTy(*parser_ast.llvm_context_), arguments_types, false);
+        Type::getDoubleTy(*parser_ast_.llvm_context_), arguments_types, false);
     Function *function =
         Function::Create(function_type, Function::ExternalLinkage, name_,
-                         parser_ast.llvm_module_.get());
+                         parser_ast_.llvm_module_.get());
     // set names for all arguments
     std::uint32_t idx{0};
     for (auto &arg : function->args()) {
@@ -204,6 +214,7 @@ public:
 private:
   std::string name_;
   std::vector<std::string> arguments_names_;
+  const ParserAST &parser_ast_;
 };
 
 /**
@@ -211,9 +222,11 @@ private:
  */
 class FunctionDefinitionAST : public IRCode {
 public:
-  FunctionDefinitionAST(std::unique_ptr<FunctionPrototypeAST> prototype,
+  FunctionDefinitionAST(ParserAST &parser_ast,
+                        std::unique_ptr<FunctionPrototypeAST> prototype,
                         std::unique_ptr<ExpressionAST> body)
-      : prototype_{std::move(prototype)}, body_{std::move(body)} {}
+      : parser_ast_{parser_ast}, prototype_{std::move(prototype)},
+        body_{std::move(body)} {}
 
   /**
    * todo: This code does have a bug, though:
@@ -233,61 +246,61 @@ public:
     // todo: does it regard all functions added to this module, not only
     // `extern` ones?
     Function *function =
-        parser_ast.llvm_module_->getFunction(prototype_->name());
+        parser_ast_.llvm_module_->getFunction(prototype_->name());
     if (function) {
-      log_error("function cannot be redefined");
+      parser_ast_.log_error("function cannot be redefined");
       return {};
     }
     function = prototype_->generate_IR_code();
     if (!function) {
-      log_error("function cannot generate IR code");
+      parser_ast_.log_error("function cannot generate IR code");
       return {};
     }
     // `empty()` here means there is no function body yet
     if (!function->empty()) {
-      log_error("function generated IR code is empty");
+      parser_ast_.log_error("function generated IR code is empty");
       return {};
     }
 
     // create a new basic block(body) to start insertion into
     BasicBlock *basic_block =
-        BasicBlock::Create(*parser_ast.llvm_context_, "begin", function);
+        BasicBlock::Create(*parser_ast_.llvm_context_, "begin", function);
     // from doc: This specifies that created instructions should be appended to
     // the end of the specified block.
-    parser_ast.llvm_IR_builder_->SetInsertPoint(basic_block);
+    parser_ast_.llvm_IR_builder_->SetInsertPoint(basic_block);
 
     // record the function arguments in the function parameters map.
     // todo: how global `function_arguments_` could be moved locally to a
     // function definition?
-    parser_ast.function_arguments_.clear();
+    parser_ast_.function_arguments_.clear();
     for (auto &arg : function->args()) {
-      parser_ast.function_arguments_[std::string{arg.getName()}] = &arg;
+      parser_ast_.function_arguments_[std::string{arg.getName()}] = &arg;
     }
 
     Value *body_value = body_->generate_IR_code();
     if (!body_value) {
-      log_error("function body generated IR code failed");
+      parser_ast_.log_error("function body generated IR code failed");
       function->eraseFromParent();
       return {};
     }
 
     // finish off the function
-    Value *ret_value = parser_ast.llvm_IR_builder_->CreateRet(body_value);
+    Value *ret_value = parser_ast_.llvm_IR_builder_->CreateRet(body_value);
     if (!ret_value) {
-      log_error("function create ret failed");
+      parser_ast_.log_error("function create ret failed");
       function->eraseFromParent();
       return {};
     }
 
     // validate the generated code, checking for consistency
     if (verifyFunction(*function, &errs())) {
-      log_error("function verification failed");
+      parser_ast_.log_error("function verification failed");
       function->eraseFromParent();
       return {};
     }
 
-    parser_ast.function_pass_manager_->run(
-        *function, *parser_ast.function_analysis_manager_);
+    parser_ast_.function_pass_manager_->run(
+        *function, *parser_ast_.function_analysis_manager_);
 
     return function;
   }
@@ -295,21 +308,27 @@ public:
 private:
   std::unique_ptr<FunctionPrototypeAST> prototype_;
   std::unique_ptr<ExpressionAST> body_;
+  ParserAST &parser_ast_;
 };
 
-ParserAST::ParserAST()
-    : llvm_context_{std::make_unique<LLVMContext>()},
-      llvm_IR_builder_{std::make_unique<IRBuilder<>>(*llvm_context_)},
-      llvm_module_{std::make_unique<Module>("global_module", *llvm_context_)},
-      function_pass_manager_{std::make_unique<FunctionPassManager>()},
-      loop_analysis_manager_{std::make_unique<LoopAnalysisManager>()},
-      function_analysis_manager_{std::make_unique<FunctionAnalysisManager>()},
-      cgscc_analysis_manager_{std::make_unique<CGSCCAnalysisManager>()},
-      module_analysis_manager_{std::make_unique<ModuleAnalysisManager>()},
-      pass_instrumentation_callbacks_{
-          std::make_unique<PassInstrumentationCallbacks>()},
-      standard_instrumentations_{
-          std::make_unique<StandardInstrumentations>(*llvm_context_, true)} {
+ParserAST::ParserAST(Jit &jit) : jit_{jit} { init(); }
+
+void ParserAST::init() {
+  llvm_context_ = std::make_unique<LLVMContext>();
+  llvm_IR_builder_ = std::make_unique<IRBuilder<>>(*llvm_context_);
+  llvm_module_ = std::make_unique<Module>("ToyJIT", *llvm_context_);
+  function_pass_manager_ = std::make_unique<FunctionPassManager>();
+  loop_analysis_manager_ = std::make_unique<LoopAnalysisManager>();
+  function_analysis_manager_ = std::make_unique<FunctionAnalysisManager>();
+  cgscc_analysis_manager_ = std::make_unique<CGSCCAnalysisManager>();
+  module_analysis_manager_ = std::make_unique<ModuleAnalysisManager>();
+  pass_instrumentation_callbacks_ =
+      std::make_unique<PassInstrumentationCallbacks>();
+  standard_instrumentations_ =
+      std::make_unique<StandardInstrumentations>(*llvm_context_, true);
+
+  llvm_module_->setDataLayout(jit_.data_layout_);
+
   standard_instrumentations_->registerCallbacks(
       *pass_instrumentation_callbacks_, module_analysis_manager_.get());
 
@@ -330,13 +349,9 @@ ParserAST::ParserAST()
       *cgscc_analysis_manager_, *module_analysis_manager_);
 }
 
-ParserAST &ParserAST::instance() {
-  static std::unique_ptr<ParserAST> instance{new ParserAST()};
-  return *instance;
-}
-
 std::unique_ptr<ExpressionAST> ParserAST::parse_number_expression() {
-  auto result = std::make_unique<NumberExpressionAST>(lexer_.number_value_);
+  auto result =
+      std::make_unique<NumberExpressionAST>(*this, lexer_.number_value_);
   lexer_.next_token();
   return std::move(result);
 }
@@ -366,7 +381,7 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
   // simple variable reference
   if (lexer_.current_token_ !=
       Lexer::to_token(ReservedToken::token_leading_parenthesis)) {
-    return std::make_unique<VariableExpressionAST>(id_name);
+    return std::make_unique<VariableExpressionAST>(*this, id_name);
   }
 
   // function call
@@ -399,7 +414,8 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
   // eat ending ')'
   lexer_.next_token();
 
-  return std::make_unique<CallExpressionAST>(id_name, std::move(arguments));
+  return std::make_unique<CallExpressionAST>(*this, id_name,
+                                             std::move(arguments));
 }
 
 std::unique_ptr<ExpressionAST> ParserAST::parse_primary_expression() {
@@ -452,8 +468,8 @@ ParserAST::parse_binary_operation_rhs(Token expression_precedence,
       }
     }
 
-    lhs = std::make_unique<BinaryExpressionAST>(binary_op, std::move(lhs),
-                                                std::move(rhs));
+    lhs = std::make_unique<BinaryExpressionAST>(*this, binary_op,
+                                                std::move(lhs), std::move(rhs));
   }
 }
 
@@ -517,7 +533,7 @@ std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_function_prototype() {
   // eat ending ')'
   lexer_.next_token();
 
-  return std::make_unique<FunctionPrototypeAST>(function_name,
+  return std::make_unique<FunctionPrototypeAST>(*this, function_name,
                                                 std::move(arguments_names));
 }
 
@@ -534,7 +550,7 @@ std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_function_definition() {
   // building block
   if (auto expression = parse_expression()) {
     return std::make_unique<FunctionDefinitionAST>(
-        std::move(function_prototype), std::move(expression));
+        *this, std::move(function_prototype), std::move(expression));
   }
 
   return {};
@@ -544,9 +560,9 @@ std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_top_level_expression() {
   if (auto expression = parse_expression()) {
     // make a function prototype with anonymous name
     auto function_prototype = std::make_unique<FunctionPrototypeAST>(
-        "__anon_expr", std::vector<std::string>());
+        *this, kAnonymousExpression, std::vector<std::string>());
     return std::make_unique<FunctionDefinitionAST>(
-        std::move(function_prototype), std::move(expression));
+        *this, std::move(function_prototype), std::move(expression));
   }
   return {};
 }
@@ -563,6 +579,9 @@ void ParserAST::handle_function_definition() {
       fprintf(stderr, "parsed a function definition\n");
       ir_code->print(errs());
       fprintf(stderr, "\n");
+      ExitOnErr(jit_.addModule(
+          ThreadSafeModule(std::move(llvm_module_), std::move(llvm_context_))));
+      init();
     }
   }
   // else {
@@ -586,21 +605,50 @@ void ParserAST::handle_extern() {
 
 void ParserAST::handle_top_level_expression() {
   // evaluate a top-level expression into anonymous function
-  if (auto function_definition = parse_top_level_expression()) {
+  if (const auto function_definition = parse_top_level_expression()) {
     if (auto *ir_code = function_definition->generate_IR_code()) {
-      fprintf(stderr, "parsed a top level expression\n");
-      ir_code->print(errs());
-      fprintf(stderr, "\n");
+      // create a `ResourceTracker` to track JIT'd memory allocated to our
+      // anonymous expression -- that way we can free it after executing.
+      const auto resource_tracker = jit_.jit_dylib_.createResourceTracker();
+      auto thread_safe_module =
+          ThreadSafeModule(std::move(llvm_module_), std::move(llvm_context_));
+      ExitOnErr(
+          jit_.addModule(std::move(thread_safe_module), resource_tracker));
+      init();
 
-      // todo: fix, this removes the IR code from module, so is not printed on
-      // `dump()`
-      //  remove the anonymous expression
-      ir_code->eraseFromParent();
+      // search the Jit for __anon_expr symbol
+      const auto expression_symbol =
+          ExitOnErr(jit_.lookup(kAnonymousExpression));
+
+      // get the symbol's address and cast it to the right type (takes no
+      // arguments, returns a double) so we can call it as a native function.
+      double (*function_pointer)() = expression_symbol.toPtr<double (*)()>();
+      fprintf(stderr, "evaluated to %f\n", function_pointer());
+
+      // delete the anonymous expression module from Jit
+      ExitOnErr(resource_tracker->remove());
+
+      // fprintf(stderr, "parsed a top level expression\n");
+      // ir_code->print(errs());
+      // fprintf(stderr, "\n");
+      //
+      // // todo: fix, this removes the IR code, so is not printed on `dump()`
+      // //  remove the anonymous expression
+      // ir_code->eraseFromParent();
     }
   } else {
     // skip token for error recovery
     lexer_.next_token();
   }
+}
+
+void ParserAST::log_error(const char *token) const {
+  fprintf(stderr, "error: %s at row %d, col %d\n", token, lexer_.row_,
+          lexer_.col_);
+}
+
+void ParserAST::log_error_prototype(const char *token) const {
+  log_error(token);
 }
 
 void ParserAST::run() {
@@ -626,7 +674,7 @@ void ParserAST::run() {
       break;
     case ReservedToken::token_exit:
       fprintf(stderr, "dump module\n");
-      parser_ast.llvm_module_->dump();
+      llvm_module_->dump();
       return;
     default:
       handle_top_level_expression();
