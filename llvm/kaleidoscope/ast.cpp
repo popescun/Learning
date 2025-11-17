@@ -3,6 +3,9 @@
 //
 
 #include "ast.hpp"
+
+#include <functional>
+
 #include "jit.hpp"
 
 #include <llvm/ADT/APFloat.h>
@@ -33,6 +36,9 @@ namespace {
 ExitOnError ExitOnErr;
 
 constexpr auto kAnonymousExpression{"__anon_expr"};
+
+std::map<std::string, std::unique_ptr<FunctionPrototypeAST>>
+    function_prototypes{};
 
 } // namespace
 
@@ -141,13 +147,13 @@ private:
 class CallExpressionAST final : public ExpressionAST {
 public:
   explicit CallExpressionAST(
-      const ParserAST &parser_ast, std::string callee,
+      ParserAST &parser_ast, std::string callee,
       std::vector<std::unique_ptr<ExpressionAST>> arguments)
       : parser_ast_{parser_ast}, callee_{std::move(callee)},
         arguments_{std::move(arguments)} {}
   Value *generate_IR_code() override {
     // look up the name in the global module table
-    Function *function = parser_ast_.llvm_module_->getFunction(callee_);
+    Function *function = parser_ast_.get_function(callee_);
     if (!function) {
       parser_ast_.log_error("unknown function referenced");
       return {};
@@ -173,7 +179,7 @@ public:
 private:
   std::string callee_;
   std::vector<std::unique_ptr<ExpressionAST>> arguments_;
-  const ParserAST &parser_ast_;
+  ParserAST &parser_ast_;
 };
 
 /**
@@ -225,8 +231,8 @@ public:
   FunctionDefinitionAST(ParserAST &parser_ast,
                         std::unique_ptr<FunctionPrototypeAST> prototype,
                         std::unique_ptr<ExpressionAST> body)
-      : parser_ast_{parser_ast}, prototype_{std::move(prototype)},
-        body_{std::move(body)} {}
+      : prototype_{std::move(prototype)}, body_{std::move(body)},
+        parser_ast_{parser_ast} {}
 
   /**
    * todo: This code does have a bug, though:
@@ -242,23 +248,16 @@ public:
    * takes precedence).
    */
   Function *generate_IR_code() override {
-    // first, check for existing function from previous `extern` declaration
+    // first, transfer ownership of the prototype to function prototypes map,
+    // but keep a reference to it for use bellow
+    const auto &name = prototype_->name();
+    function_prototypes[prototype_->name()] = std::move(prototype_);
+    // check for existing function from previous `extern` declaration
     // todo: does it regard all functions added to this module, not only
-    // `extern` ones?
-    Function *function =
-        parser_ast_.llvm_module_->getFunction(prototype_->name());
-    if (function) {
-      parser_ast_.log_error("function cannot be redefined");
-      return {};
-    }
-    function = prototype_->generate_IR_code();
+    // `extern`s
+    Function *function = parser_ast_.get_function(name);
     if (!function) {
-      parser_ast_.log_error("function cannot generate IR code");
-      return {};
-    }
-    // `empty()` here means there is no function body yet
-    if (!function->empty()) {
-      parser_ast_.log_error("function generated IR code is empty");
+      parser_ast_.log_error("function cannot be redefined");
       return {};
     }
 
@@ -271,7 +270,7 @@ public:
 
     // record the function arguments in the function parameters map.
     // todo: how global `function_arguments_` could be moved locally to a
-    // function definition?
+    // todo: function definition?
     parser_ast_.function_arguments_.clear();
     for (auto &arg : function->args()) {
       parser_ast_.function_arguments_[std::string{arg.getName()}] = &arg;
@@ -299,6 +298,7 @@ public:
       return {};
     }
 
+    // run the optimizer on the function
     parser_ast_.function_pass_manager_->run(
         *function, *parser_ast_.function_analysis_manager_);
 
@@ -571,6 +571,23 @@ std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_external() {
   // eat extern
   lexer_.next_token();
   return parse_function_prototype();
+}
+
+Function *ParserAST::get_function(const std::string &name) const {
+  // first, see if the function is present in the module
+  if (auto *function = llvm_module_->getFunction(name)) {
+    return function;
+  }
+
+  // if not, check whether we can codegen the declaration from some existing
+  // prototype
+  auto it = function_prototypes.find(name);
+  if (it != function_prototypes.end()) {
+    return it->second->generate_IR_code();
+  }
+
+  // if no existing prototype exists, return null
+  return {};
 }
 
 void ParserAST::handle_function_definition() {
