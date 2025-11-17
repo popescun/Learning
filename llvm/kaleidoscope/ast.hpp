@@ -135,7 +135,7 @@ struct ParserAST {
    * Handle input expressions with syntax:
    *  top ::= definition | external | expression | ';'
    */
-  void main_loop();
+  void run();
 
   Lexer lexer_;
   std::unique_ptr<llvm::LLVMContext> llvm_context_;

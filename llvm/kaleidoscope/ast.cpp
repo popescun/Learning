@@ -603,7 +603,7 @@ void ParserAST::handle_top_level_expression() {
   }
 }
 
-void ParserAST::main_loop() {
+void ParserAST::run() {
   // prime the first token
   fprintf(stderr, "toy> ");
   lexer_.next_token();

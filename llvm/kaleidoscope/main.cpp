@@ -4,6 +4,6 @@
 #include "ast.hpp"
 
 int main() {
-  toy::ParserAST::instance().main_loop();
+  toy::ParserAST::instance().run();
   return 0;
 }
