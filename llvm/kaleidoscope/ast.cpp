@@ -44,41 +44,36 @@ std::map<std::string, std::unique_ptr<FunctionPrototypeAST>>
 
 using Token = Token;
 
-class IRCode {
-public:
+struct IRCode {
   virtual ~IRCode() = default;
   virtual Value *generate_IR_code() = 0;
 };
 
 /**
- *  Base class for all expression nodes.
+ *  Base struct for all expression nodes.
  */
-class ExpressionAST : public IRCode {
-public:
+struct ExpressionAST : IRCode {
   ~ExpressionAST() override = default;
 };
 
 /**
- * Expression class for numeric literals like "1.0".
+ * Expression struct for numeric literals like "1.0".
  */
-class NumberExpressionAST final : public ExpressionAST {
-public:
+struct NumberExpressionAST final : ExpressionAST {
   explicit NumberExpressionAST(const ParserAST &parser_ast, double value)
       : parser_ast_{parser_ast}, value_{value} {}
   Value *generate_IR_code() override {
     return ConstantFP::get(*parser_ast_.llvm_context_, APFloat(value_));
   }
 
-private:
   double value_;
   const ParserAST &parser_ast_;
 };
 
 /**
- * Expression class for referencing a variable, like "a".
+ * Expression struct for referencing a variable, like "a".
  */
-class VariableExpressionAST final : public ExpressionAST {
-public:
+struct VariableExpressionAST final : ExpressionAST {
   explicit VariableExpressionAST(ParserAST &parser_ast, std::string name)
       : parser_ast_{parser_ast}, name_{std::move(name)} {}
   Value *generate_IR_code() override {
@@ -95,10 +90,9 @@ public:
 };
 
 /**
- * Expression class for a binary operator like "+".
+ * Expression struct for a binary operator like "+".
  */
-class BinaryExpressionAST final : public ExpressionAST {
-public:
+struct BinaryExpressionAST final : ExpressionAST {
   explicit BinaryExpressionAST(const ParserAST &parser_ast, Token op,
                                std::unique_ptr<ExpressionAST> lhs,
                                std::unique_ptr<ExpressionAST> rhs)
@@ -135,17 +129,15 @@ public:
     }
   }
 
-private:
   ReservedToken operator_;
   std::unique_ptr<ExpressionAST> lhs_, rhs_;
   const ParserAST &parser_ast_;
 };
 
 /**
- * Expression class for function calls.
+ * Expression struct for function calls.
  */
-class CallExpressionAST final : public ExpressionAST {
-public:
+struct CallExpressionAST final : ExpressionAST {
   explicit CallExpressionAST(
       ParserAST &parser_ast, std::string callee,
       std::vector<std::unique_ptr<ExpressionAST>> arguments)
@@ -176,19 +168,17 @@ public:
                                                     "calltmp");
   }
 
-private:
   std::string callee_;
   std::vector<std::unique_ptr<ExpressionAST>> arguments_;
   ParserAST &parser_ast_;
 };
 
 /**
- * This class represents the "prototype" for a function, which captures its
+ * This struct represents the "prototype" for a function, which captures its
  * name, and its argument names (thus implicitly the number of arguments the
  * function takes).
  */
-class FunctionPrototypeAST : IRCode {
-public:
+struct FunctionPrototypeAST : IRCode {
   FunctionPrototypeAST(const ParserAST &parser_ast, std::string name,
                        std::vector<std::string> arguments_names)
       : parser_ast_{parser_ast}, name_{std::move(name)},
@@ -215,19 +205,15 @@ public:
     return function;
   }
 
-  [[nodiscard]] const std::string &name() const { return name_; }
-
-private:
   std::string name_;
   std::vector<std::string> arguments_names_;
   const ParserAST &parser_ast_;
 };
 
 /**
- * This class represents a function definition itself.
+ * This struct represents a function definition itself.
  */
-class FunctionDefinitionAST : public IRCode {
-public:
+struct FunctionDefinitionAST : IRCode {
   FunctionDefinitionAST(ParserAST &parser_ast,
                         std::unique_ptr<FunctionPrototypeAST> prototype,
                         std::unique_ptr<ExpressionAST> body)
@@ -250,8 +236,8 @@ public:
   Function *generate_IR_code() override {
     // first, transfer ownership of the prototype to function prototypes map,
     // but keep a reference to it for use bellow
-    const auto &name = prototype_->name();
-    function_prototypes[prototype_->name()] = std::move(prototype_);
+    const auto &name = prototype_->name_;
+    function_prototypes[prototype_->name_] = std::move(prototype_);
     // check for existing function from previous `extern` declaration
     // todo: does it regard all functions added to this module, not only
     // `extern`s
@@ -263,7 +249,7 @@ public:
 
     // create a new basic block(body) to start insertion into
     BasicBlock *basic_block =
-        BasicBlock::Create(*parser_ast_.llvm_context_, "begin", function);
+        BasicBlock::Create(*parser_ast_.llvm_context_, "entry", function);
     // from doc: This specifies that created instructions should be appended to
     // the end of the specified block.
     parser_ast_.llvm_IR_builder_->SetInsertPoint(basic_block);
@@ -305,7 +291,6 @@ public:
     return function;
   }
 
-private:
   std::unique_ptr<FunctionPrototypeAST> prototype_;
   std::unique_ptr<ExpressionAST> body_;
   ParserAST &parser_ast_;
@@ -593,23 +578,23 @@ Function *ParserAST::get_function(const std::string &name) const {
 }
 
 void ParserAST::handle_function_definition() {
-  if (auto function_definition = parse_function_definition()) {
-    if (auto *ir_code = function_definition->generate_IR_code()) {
+  if (const auto function_definition = parse_function_definition()) {
+    if (const auto *ir_code = function_definition->generate_IR_code()) {
       fprintf(stderr, "parsed a function definition\n");
       ir_code->print(errs());
       fprintf(stderr, "\n");
       const auto resource_tracker = jit_.jit_dylib_.createResourceTracker();
-      auto thread_safe_module =
-          ThreadSafeModule(std::move(llvm_module_), std::move(llvm_context_));
-      ExitOnErr(
-          jit_.addModule(std::move(thread_safe_module), resource_tracker));
+      // warning, this is an expected error:
+      //   In ToyJIT, duplicate definition of symbol '_test'
+      // see
+      // https://llvm.org/docs/tutorial/MyFirstLanguageFrontend/LangImpl04.html
+      // :
+      //   "Duplication of symbols in separate modules is not allowed since
+      //   LLVM-9"
+      ExitOnErr(jit_.addModule(
+          ThreadSafeModule(std::move(llvm_module_), std::move(llvm_context_)),
+          resource_tracker));
       init();
-      // todo: we can also search if the symbol was added, like for anonymous
-      // calls todo:  fix this must be done before same symbol is added again,
-      // otherwise this error:
-      //     In ToyJIT, duplicate definition of symbol '_test'
-      //  delete the anonymous expression module from Jit
-      //  ExitOnErr(resource_tracker->remove());
     }
   }
   // else {
@@ -620,11 +605,11 @@ void ParserAST::handle_function_definition() {
 
 void ParserAST::handle_extern() {
   if (auto function_prototype = parse_external()) {
-    if (auto *ir_code = function_prototype->generate_IR_code()) {
+    if (const auto *ir_code = function_prototype->generate_IR_code()) {
       fprintf(stderr, "parsed an external function\n");
       ir_code->print(errs());
       fprintf(stderr, "\n");
-      function_prototypes[function_prototype->name()] =
+      function_prototypes[function_prototype->name_] =
           std::move(function_prototype);
     }
   } else {
@@ -636,7 +621,7 @@ void ParserAST::handle_extern() {
 void ParserAST::handle_top_level_expression() {
   // evaluate a top-level expression into anonymous function
   if (const auto function_definition = parse_top_level_expression()) {
-    if (auto *ir_code = function_definition->generate_IR_code()) {
+    if (const auto *ir_code = function_definition->generate_IR_code()) {
       fprintf(stderr, "parsed a top level expression\n");
       ir_code->print(errs());
       fprintf(stderr, "\n");
@@ -647,6 +632,8 @@ void ParserAST::handle_top_level_expression() {
           ThreadSafeModule(std::move(llvm_module_), std::move(llvm_context_));
       ExitOnErr(
           jit_.addModule(std::move(thread_safe_module), resource_tracker));
+      // llvm module once added it cannot be modified, so it's safe to
+      // re-initialize
       init();
 
       // search the Jit for __anon_expr symbol
@@ -655,10 +642,11 @@ void ParserAST::handle_top_level_expression() {
 
       // get the symbol's address and cast it to the right type (takes no
       // arguments, returns a double) so we can call it as a native function.
-      double (*function_pointer)() = expression_symbol.toPtr<double (*)()>();
+      double (*function_pointer)() =
+          expression_symbol.getAddress().toPtr<double (*)()>();
       fprintf(stderr, "evaluated to %f\n", function_pointer());
 
-      // delete the anonymous expression module from Jit
+      // delete the module containing anonymous expression from Jit
       ExitOnErr(resource_tracker->remove());
       //
       // // todo: fix, this removes the IR code, so is not printed on `dump()`
@@ -713,3 +701,17 @@ void ParserAST::run() {
 }
 
 } // namespace toy
+
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
+/// putchard - putchar that takes a double and returns 0.
+extern "C" DLLEXPORT double log(double x) {
+  // fputc(static_cast<char>(x), stderr);
+  fprintf(stderr, "ASCII code %d, char:%c\n", static_cast<int>(x),
+          static_cast<char>(x));
+  return 0;
+}

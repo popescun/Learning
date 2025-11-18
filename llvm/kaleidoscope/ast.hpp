@@ -25,9 +25,9 @@
 
 namespace toy {
 
-class ExpressionAST;
-class FunctionPrototypeAST;
-class FunctionDefinitionAST;
+struct ExpressionAST;
+struct FunctionPrototypeAST;
+struct FunctionDefinitionAST;
 
 struct Jit;
 
