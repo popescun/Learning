@@ -11,21 +11,18 @@
 #include <string>
 
 namespace toy {
-
 using Token = std::int8_t;
 
 enum class ReservedToken : Token {
-  token_eof = -1,
+  token_unknown = -1,
 
-  // commands
+  // keywords
   token_function_definition = -2,
   token_external_function = -3,
   // primary
   token_identifier = -4,
   token_number = -5,
-  //
-  token_exit = -6,
-  token_unknown = -7,
+  // punctuators
   token_leading_parenthesis = '(',
   token_trailing_parenthesis = ')',
   // reserved characters
@@ -37,15 +34,28 @@ enum class ReservedToken : Token {
   token_operator_subtract = '-',
   token_operator_multiply = '*',
   token_operator_less = '<',
-
+  // input
   token_new_line = '\n',
+  token_eof = -6,
+  // flow controls
+  token_if = -7,
+  token_then = -8,
+  token_else = -9,
+  // exit program
+  token_exit = -10
 };
 
-/**
- * The lexer returns tokens [0-255] if it is an unknown character, otherwise one
- * of these for known things.
- */
-struct Lexer {
+#define STRINGIFY(s) #s
+#define keyword_token(t) constexpr auto keyword_token_##t{STRINGIFY(t)};
+
+keyword_token(def) keyword_token(extern) keyword_token(if) keyword_token(then)
+    keyword_token(else)
+
+    /**
+     * The lexer returns tokens [0-255] if it is an unknown character, otherwise
+     * one of these for known things.
+     */
+    struct Lexer {
   /**
    * Update current token and next character token from standard input.
    *

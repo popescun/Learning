@@ -23,14 +23,15 @@ void Lexer::next_token() {
     next_token_ = get_char();
   }
 
-  // identifier_: [a-zA-Z][a-zA-Z0-9]*
+  // keywords and identifier: [a-zA-Z][a-zA-Z0-9]*
   if (isalpha(next_token_)) {
     identifier_ = next_token_;
     while (isalnum(next_token_ = get_char())) {
       identifier_ += next_token_;
     }
 
-    if (identifier_ == "def") {
+    // todo: use defines or so fo keywords
+    if (identifier_ == keyword_token_def) {
       current_token_ = to_token(ReservedToken::token_function_definition);
       return;
     }
@@ -40,8 +41,23 @@ void Lexer::next_token() {
       return;
     }
 
-    if (identifier_ == "extern") {
+    if (identifier_ == keyword_token_def) {
       current_token_ = to_token(ReservedToken::token_external_function);
+      return;
+    }
+
+    if (identifier_ == keyword_token_if) {
+      current_token_ = to_token(ReservedToken::token_if);
+      return;
+    }
+
+    if (identifier_ == keyword_token_then) {
+      current_token_ = to_token(ReservedToken::token_then);
+      return;
+    }
+
+    if (identifier_ == keyword_token_else) {
+      current_token_ = to_token(ReservedToken::token_else);
       return;
     }
 
@@ -88,7 +104,6 @@ void Lexer::next_token() {
   // otherwise, just return the character as its ascii value
   current_token_ = next_token_;
   next_token_ = get_char();
-  return;
 }
 
 std::int8_t Lexer::get_current_token_precedence() {
