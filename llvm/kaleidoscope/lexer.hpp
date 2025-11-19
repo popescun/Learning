@@ -48,14 +48,19 @@ enum class ReservedToken : Token {
 #define STRINGIFY(s) #s
 #define keyword_token(t) constexpr auto keyword_token_##t{STRINGIFY(t)};
 
-keyword_token(def) keyword_token(extern) keyword_token(if) keyword_token(then)
-    keyword_token(else)
+// clang-format off
+keyword_token(def)
+keyword_token(extern)
+keyword_token(if)
+keyword_token(then)
+keyword_token(else);
+// clang-format on
 
-    /**
-     * The lexer returns tokens [0-255] if it is an unknown character, otherwise
-     * one of these for known things.
-     */
-    struct Lexer {
+/**
+ * The lexer returns tokens [0-255] if it is an unknown character, otherwise
+ * one of these for known things.
+ */
+struct Lexer {
   /**
    * Update current token and next character token from standard input.
    *
