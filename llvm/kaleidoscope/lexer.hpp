@@ -19,11 +19,12 @@ enum class ReservedToken : Token {
   // keywords
   token_function_definition = -2,
   token_external_function = -3,
-  // primary
+  // primary, standalone or start of an expression
   token_identifier = -4,
   token_number = -5,
-  // punctuators
+  token_if = -6,
   token_leading_parenthesis = '(',
+  // punctuators
   token_trailing_parenthesis = ')',
   // reserved characters
   token_whitespace = ' ',
@@ -36,9 +37,8 @@ enum class ReservedToken : Token {
   token_operator_less = '<',
   // input
   token_new_line = '\n',
-  token_eof = -6,
-  // flow controls
-  token_if = -7,
+  token_eof = -8,
+  // if flow control
   token_then = -8,
   token_else = -9,
   // exit program

@@ -118,6 +118,14 @@ struct ParserAST {
   std::unique_ptr<FunctionDefinitionAST> parse_top_level_expression();
 
   /**
+   * Parse if expression with syntax:
+   *    ifexpr ::= 'if' expression 'then' expression 'else' expression
+   *
+   * @return a ExpressionAST
+   */
+  std::unique_ptr<ExpressionAST> parse_if_expression();
+
+  /**
    * Parse external n with syntax:
    *    external ::= 'extern' prototype
    *

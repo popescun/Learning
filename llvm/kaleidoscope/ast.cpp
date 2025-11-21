@@ -49,6 +49,8 @@ struct IRCode {
   virtual Value *generate_IR_code() = 0;
 };
 
+// AST types
+
 /**
  *  Base struct for all expression nodes.
  */
@@ -285,8 +287,10 @@ struct FunctionDefinitionAST : IRCode {
     }
 
     // run the optimizer on the function
-    parser_ast_.function_pass_manager_->run(
-        *function, *parser_ast_.function_analysis_manager_);
+    if (parser_ast_.function_pass_manager_) {
+      parser_ast_.function_pass_manager_->run(
+          *function, *parser_ast_.function_analysis_manager_);
+    }
 
     return function;
   }
@@ -295,6 +299,87 @@ struct FunctionDefinitionAST : IRCode {
   std::unique_ptr<ExpressionAST> body_;
   ParserAST &parser_ast_;
 };
+
+struct IfExpressionAST : public ExpressionAST {
+  IfExpressionAST(ParserAST &parser_ast, std::unique_ptr<ExpressionAST> _if,
+                  std::unique_ptr<ExpressionAST> _then,
+                  std::unique_ptr<ExpressionAST> _else)
+      : parser_ast_{parser_ast}, if_{std::move(_if)}, then_{std::move(_then)},
+        else_{std::move(_else)} {}
+
+  Value *generate_IR_code() override {
+    Value *if_value = if_->generate_IR_code();
+    if (!if_value) {
+      return {};
+    }
+
+    // convert `if` condition to a truth value(bool) by comparing non-equal to
+    // 0.0
+    if_value = parser_ast_.llvm_IR_builder_->CreateFCmpONE(
+        if_value, ConstantFP::get(*parser_ast_.llvm_context_, APFloat(0.0)),
+        "ifcond");
+
+    // get enclosing function
+    Function *function =
+        parser_ast_.llvm_IR_builder_->GetInsertBlock()->getParent();
+    if (!function) {
+      return {};
+    }
+
+    BasicBlock *then_block =
+        BasicBlock::Create(*parser_ast_.llvm_context_, "then", function);
+    BasicBlock *else_block =
+        BasicBlock::Create(*parser_ast_.llvm_context_, "else");
+    parser_ast_.llvm_IR_builder_->CreateCondBr(if_value, then_block,
+                                               else_block);
+
+    // codegen `then` value
+    parser_ast_.llvm_IR_builder_->SetInsertPoint(then_block);
+    Value *then_value = then_->generate_IR_code();
+    if (!then_value) {
+      return {};
+    }
+
+    BasicBlock *merge_block =
+        BasicBlock::Create(*parser_ast_.llvm_context_, "ifcont");
+    parser_ast_.llvm_IR_builder_->CreateBr(merge_block);
+
+    // codegen of `then` by changing the current block, update `then` block for
+    // PHI.
+    then_block = parser_ast_.llvm_IR_builder_->GetInsertBlock();
+
+    // codegen `else` block
+    function->insert(function->end(), else_block);
+    parser_ast_.llvm_IR_builder_->SetInsertPoint(else_block);
+    Value *else_value = else_->generate_IR_code();
+    if (!else_value) {
+      return {};
+    }
+    parser_ast_.llvm_IR_builder_->CreateBr(merge_block);
+    // codegen of `else` can change the current block, update else block for
+    // PHI.
+    else_block = parser_ast_.llvm_IR_builder_->GetInsertBlock();
+
+    // emit `merge` block
+    function->insert(function->end(), merge_block);
+    parser_ast_.llvm_IR_builder_->SetInsertPoint(merge_block);
+    PHINode *phi_node = parser_ast_.llvm_IR_builder_->CreatePHI(
+        Type::getDoubleTy(*parser_ast_.llvm_context_), 2, "iftmp");
+    if (!phi_node) {
+      return {};
+    }
+
+    phi_node->addIncoming(then_value, then_block);
+    phi_node->addIncoming(else_value, else_block);
+
+    return phi_node;
+  }
+
+  ParserAST &parser_ast_;
+  std::unique_ptr<ExpressionAST> if_, then_, else_;
+};
+
+// ParserAST definition
 
 ParserAST::ParserAST(Jit &jit) : jit_{jit} { init(); }
 
@@ -413,6 +498,8 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_primary_expression() {
     return parse_number_expression();
   case ReservedToken::token_leading_parenthesis:
     return parse_parenthesis_expression();
+  case ReservedToken::token_if:
+    return parse_if_expression();
   default:
     log_error("unknown token when expecting an expression");
     return {};
@@ -552,6 +639,47 @@ std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_top_level_expression() {
         *this, std::move(function_prototype), std::move(expression));
   }
   return {};
+}
+
+std::unique_ptr<ExpressionAST> ParserAST::parse_if_expression() {
+  // eat `if` token
+  lexer_.next_token();
+
+  // condition
+  auto if_condition = parse_expression();
+  if (!if_condition) {
+    return {};
+  }
+
+  if (lexer_.current_token_ != Lexer::to_token(ReservedToken::token_then)) {
+    log_error("expected `then` expression in `if..then..else` expression");
+    return {};
+  }
+
+  // eat `then`
+  lexer_.next_token();
+
+  auto then_expression = parse_expression();
+  if (!then_expression) {
+    return {};
+  }
+
+  if (lexer_.current_token_ != Lexer::to_token(ReservedToken::token_else)) {
+    log_error("expected `else` expression in `if..then..else` expression");
+    return {};
+  }
+
+  // eat `else`
+  lexer_.next_token();
+
+  auto else_expression = parse_expression();
+  if (!else_expression) {
+    return {};
+  }
+
+  return std::make_unique<IfExpressionAST>(*this, std::move(if_condition),
+                                           std::move(then_expression),
+                                           std::move(else_expression));
 }
 
 std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_external() {

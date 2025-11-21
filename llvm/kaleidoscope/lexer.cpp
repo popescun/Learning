@@ -42,6 +42,11 @@ void Lexer::next_token() {
     }
 
     if (identifier_ == keyword_token_def) {
+      current_token_ = to_token(ReservedToken::token_function_definition);
+      return;
+    }
+
+    if (identifier_ == keyword_token_extern) {
       current_token_ = to_token(ReservedToken::token_external_function);
       return;
     }
