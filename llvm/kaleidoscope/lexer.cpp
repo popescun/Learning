@@ -66,37 +66,51 @@ void Lexer::next_token() {
       return;
     }
 
+    if (identifier_ == keyword_token_for) {
+      current_token_ = to_token(ReservedToken::token_for);
+      return;
+    }
+
+    if (identifier_ == keyword_token_in) {
+      current_token_ = to_token(ReservedToken::token_in);
+      return;
+    }
+
     // otherwise is an identifier
     current_token_ = to_token(ReservedToken::token_identifier);
     return;
   }
 
   // number: [0-9.]+
-  if (isdigit(next_token_) || next_token_ == '.') {
+  if (isdigit(next_token_) ||
+      next_token_ == to_token(ReservedToken::token_dot)) {
     std::string number;
     do {
       number += next_token_;
       next_token_ = get_char();
-    } while (isdigit(next_token_) || next_token_ == '.');
+    } while (isdigit(next_token_) ||
+             next_token_ == to_token(ReservedToken::token_dot));
     number_value_ = strtod(number.c_str(), nullptr);
     current_token_ = to_token(ReservedToken::token_number);
     return;
   }
 
   // comment until end of line
-  if (next_token_ == '#') {
+  if (next_token_ == to_token(ReservedToken::token_comment)) {
     do {
       next_token_ = get_char();
-    } while (next_token_ != EOF && next_token_ != '\n' && next_token_ != 'r');
+    } while (next_token_ != to_token(ReservedToken::token_eof) &&
+             next_token_ != to_token(ReservedToken::token_new_line) &&
+             next_token_ != to_token(ReservedToken::token_carriage_return));
 
-    if (next_token_ != EOF) {
+    if (next_token_ != to_token(ReservedToken::token_eof)) {
       next_token();
       return;
     }
   }
 
   // check for end of file. Don't eat the EOF.
-  if (next_token_ == EOF) {
+  if (next_token_ == to_token(ReservedToken::token_eof)) {
     current_token_ = to_token(ReservedToken::token_eof);
     return;
   }

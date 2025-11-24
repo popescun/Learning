@@ -79,7 +79,7 @@ struct VariableExpressionAST final : ExpressionAST {
   explicit VariableExpressionAST(ParserAST &parser_ast, std::string name)
       : parser_ast_{parser_ast}, name_{std::move(name)} {}
   Value *generate_IR_code() override {
-    auto *variable = parser_ast_.function_arguments_[name_];
+    auto *variable = parser_ast_.variable_names_[name_];
     if (!variable) {
       parser_ast_.log_error("unknown variable name");
       return {};
@@ -183,8 +183,8 @@ struct CallExpressionAST final : ExpressionAST {
 struct FunctionPrototypeAST : IRCode {
   FunctionPrototypeAST(const ParserAST &parser_ast, std::string name,
                        std::vector<std::string> arguments_names)
-      : parser_ast_{parser_ast}, name_{std::move(name)},
-        arguments_names_{std::move(arguments_names)} {}
+      : name_{std::move(name)}, arguments_names_{std::move(arguments_names)},
+        parser_ast_{parser_ast} {}
   // Note that llvm `Function` is a `Value` sub-class.
   Function *generate_IR_code() override {
     // make the function type: double(double, double) etc.
@@ -257,11 +257,11 @@ struct FunctionDefinitionAST : IRCode {
     parser_ast_.llvm_IR_builder_->SetInsertPoint(basic_block);
 
     // record the function arguments in the function parameters map.
-    // todo: how global `function_arguments_` could be moved locally to a
+    // todo: how global `variable_names_` could be moved locally to a
     // todo: function definition?
-    parser_ast_.function_arguments_.clear();
+    parser_ast_.variable_names_.clear();
     for (auto &arg : function->args()) {
-      parser_ast_.function_arguments_[std::string{arg.getName()}] = &arg;
+      parser_ast_.variable_names_[std::string{arg.getName()}] = &arg;
     }
 
     Value *body_value = body_->generate_IR_code();
@@ -320,14 +320,14 @@ struct IfExpressionAST : public ExpressionAST {
         "ifcond");
 
     // get enclosing function
-    Function *function =
+    Function *parent_function =
         parser_ast_.llvm_IR_builder_->GetInsertBlock()->getParent();
-    if (!function) {
+    if (!parent_function) {
       return {};
     }
 
     BasicBlock *then_block =
-        BasicBlock::Create(*parser_ast_.llvm_context_, "then", function);
+        BasicBlock::Create(*parser_ast_.llvm_context_, "then", parent_function);
     BasicBlock *else_block =
         BasicBlock::Create(*parser_ast_.llvm_context_, "else");
     parser_ast_.llvm_IR_builder_->CreateCondBr(if_value, then_block,
@@ -349,7 +349,7 @@ struct IfExpressionAST : public ExpressionAST {
     then_block = parser_ast_.llvm_IR_builder_->GetInsertBlock();
 
     // codegen `else` block
-    function->insert(function->end(), else_block);
+    parent_function->insert(parent_function->end(), else_block);
     parser_ast_.llvm_IR_builder_->SetInsertPoint(else_block);
     Value *else_value = else_->generate_IR_code();
     if (!else_value) {
@@ -361,7 +361,7 @@ struct IfExpressionAST : public ExpressionAST {
     else_block = parser_ast_.llvm_IR_builder_->GetInsertBlock();
 
     // emit `merge` block
-    function->insert(function->end(), merge_block);
+    parent_function->insert(parent_function->end(), merge_block);
     parser_ast_.llvm_IR_builder_->SetInsertPoint(merge_block);
     PHINode *phi_node = parser_ast_.llvm_IR_builder_->CreatePHI(
         Type::getDoubleTy(*parser_ast_.llvm_context_), 2, "iftmp");
@@ -377,6 +377,123 @@ struct IfExpressionAST : public ExpressionAST {
 
   ParserAST &parser_ast_;
   std::unique_ptr<ExpressionAST> if_, then_, else_;
+};
+
+struct ForExpressionAST : public ExpressionAST {
+  ForExpressionAST(ParserAST &parser_ast, std::string variable_name,
+                   std::unique_ptr<ExpressionAST> start,
+                   std::unique_ptr<ExpressionAST> end,
+                   std::unique_ptr<ExpressionAST> step,
+                   std::unique_ptr<ExpressionAST> body)
+      : parser_ast_{parser_ast}, variable_name_{std::move(variable_name)},
+        start_{std::move(start)}, end_{std::move(end)}, step_{std::move(step)},
+        body_{std::move(body)} {}
+
+  Value *generate_IR_code() override {
+    // first, codegen the start code, without variable in scope
+    Value *start_value = start_->generate_IR_code();
+    if (!start_value) {
+      return {};
+    }
+
+    // make new basic block for loop header, inserting after block
+    Function *parent_function =
+        parser_ast_.llvm_IR_builder_->GetInsertBlock()->getParent();
+    BasicBlock *pre_header_block =
+        parser_ast_.llvm_IR_builder_->GetInsertBlock();
+    BasicBlock *loop_block =
+        BasicBlock::Create(*parser_ast_.llvm_context_, "loop", parent_function);
+
+    // insert an explicit fall through from the current block to the loop block
+    parser_ast_.llvm_IR_builder_->CreateBr(loop_block);
+
+    // start insertion in loop block
+    parser_ast_.llvm_IR_builder_->SetInsertPoint(loop_block);
+
+    // start PHI node with an entry for start
+    PHINode *phi_node = parser_ast_.llvm_IR_builder_->CreatePHI(
+        Type::getDoubleTy(*parser_ast_.llvm_context_), 2, variable_name_);
+    phi_node->addIncoming(start_value, pre_header_block);
+
+    // within loop, the variable is defined equal to the phi node value.
+    // If it shadows an existing variable, we have to restore it, so save it
+    // now.
+    Value *old_value = parser_ast_.variable_names_[variable_name_];
+    // we store variable name to be consumed when `body_` code is generated.
+    // Afterward, the old_value is restored.
+    parser_ast_.variable_names_[variable_name_] = phi_node;
+
+    // emit the body of the loop. This, like any other expression, can change
+    // the current block. Note that we ignore the value computed by the body,
+    // but don't allow an error.
+    if (!body_->generate_IR_code()) {
+      return {};
+    }
+
+    // emit step value
+    Value *step_value{};
+    if (step_) {
+      step_value = step_->generate_IR_code();
+      if (!step_value) {
+        return {};
+      }
+    } else {
+      // if not specified, use 1.0
+      step_value = ConstantFP::get(*parser_ast_.llvm_context_, APFloat{1.0});
+    }
+
+    Value *next_variable = parser_ast_.llvm_IR_builder_->CreateFAdd(
+        phi_node, step_value, "nextvar");
+
+    // compute the end condition
+    Value *end_condition = end_->generate_IR_code();
+    if (!end_condition) {
+      return {};
+    }
+
+    // convert end condition to a bool by comparing non-equal to 0.0
+    end_condition = parser_ast_.llvm_IR_builder_->CreateFCmpONE(
+        end_condition,
+        ConstantFP::get(*parser_ast_.llvm_context_, APFloat{0.0}), "loopcond");
+
+    // get loop end block
+    BasicBlock *loop_end_block = parser_ast_.llvm_IR_builder_->GetInsertBlock();
+
+    // add new entry to the phi node for the back-edge
+    // node: in doc this line is inserted bellow, does it matter? A: no
+    phi_node->addIncoming(next_variable, loop_end_block);
+
+    // create the block for the loop exit("afterloop"), and insert it
+    // note: maybe is better " instead "afterloop"?
+    BasicBlock *loop_after_block = BasicBlock::Create(
+        *parser_ast_.llvm_context_, "afterloop", parent_function);
+
+    // insert the condition branch into the end of loop end block
+    parser_ast_.llvm_IR_builder_->CreateCondBr(end_condition, loop_block,
+                                               loop_after_block);
+
+    // any new code will be inserted in loop after block
+    parser_ast_.llvm_IR_builder_->SetInsertPoint(loop_after_block);
+
+    // restore the unshadowed variable
+    if (old_value) {
+      parser_ast_.variable_names_[variable_name_] = phi_node;
+    } else {
+      parser_ast_.variable_names_.erase(variable_name_);
+    }
+
+    // for expression always returns 0.0
+    return Constant::getNullValue(
+        Type::getDoubleTy(*parser_ast_.llvm_context_));
+
+    return {};
+  }
+
+  ParserAST &parser_ast_;
+  std::string variable_name_;
+  // start_ is variable value,
+  // end_ is condition expression
+  std::unique_ptr<ExpressionAST> start_, end_, step_, body_;
 };
 
 // ParserAST definition
@@ -500,6 +617,8 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_primary_expression() {
     return parse_parenthesis_expression();
   case ReservedToken::token_if:
     return parse_if_expression();
+  case ReservedToken::token_for:
+    return parse_for_expression();
   default:
     log_error("unknown token when expecting an expression");
     return {};
@@ -607,6 +726,8 @@ std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_function_prototype() {
   // eat ending ')'
   lexer_.next_token();
 
+  // todo: function_name is first copied into constructor and then moved
+  // should we move all along? Then last identifier_ is lost in lexer.
   return std::make_unique<FunctionPrototypeAST>(*this, function_name,
                                                 std::move(arguments_names));
 }
@@ -680,6 +801,79 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_if_expression() {
   return std::make_unique<IfExpressionAST>(*this, std::move(if_condition),
                                            std::move(then_expression),
                                            std::move(else_expression));
+}
+
+std::unique_ptr<ExpressionAST> ParserAST::parse_for_expression() {
+  // eat for
+  lexer_.next_token();
+
+  if (lexer_.current_token_ !=
+      Lexer::to_token(ReservedToken::token_identifier)) {
+    log_error("expected identifier after for");
+    return {};
+  }
+
+  auto variable_name = lexer_.identifier_;
+
+  // eat identifier
+  lexer_.next_token();
+
+  if (lexer_.current_token_ !=
+      Lexer::to_token(ReservedToken::token_assignment)) {
+    log_error("expected '=' after for");
+    return {};
+  }
+
+  // eat =
+  lexer_.next_token();
+
+  auto start_expression = parse_expression();
+  if (!start_expression) {
+    return {};
+  }
+
+  if (lexer_.current_token_ != Lexer::to_token(ReservedToken::token_comma)) {
+    log_error("expected `,` after for start expression");
+    return {};
+  }
+
+  // eat comma
+  lexer_.next_token();
+
+  auto end_expression = parse_expression();
+  if (!end_expression) {
+    return {};
+  }
+
+  // the step value is optional
+  std::unique_ptr<ExpressionAST> step_expression;
+  if (lexer_.current_token_ == Lexer::to_token(ReservedToken::token_comma)) {
+    // eat comma before for step
+    lexer_.next_token();
+    step_expression = parse_expression();
+    if (!step_expression) {
+      return {};
+    }
+  }
+
+  if (lexer_.current_token_ != Lexer::to_token(ReservedToken::token_in)) {
+    log_error("expected in after for expression");
+    return {};
+  }
+
+  // eat in
+  lexer_.next_token();
+
+  auto body_expression = parse_expression();
+  if (!body_expression) {
+    return {};
+  }
+
+  // todo: here variable_name is copied to constructor and then moved
+  return std::make_unique<ForExpressionAST>(
+      *this, variable_name, std::move(start_expression),
+      std::move(end_expression), std::move(step_expression),
+      std::move(body_expression));
 }
 
 std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_external() {
@@ -837,7 +1031,7 @@ void ParserAST::run() {
 #endif
 
 /// putchard - putchar that takes a double and returns 0.
-extern "C" DLLEXPORT double log(double x) {
+extern "C" DLLEXPORT double putch(double x) {
   // fputc(static_cast<char>(x), stderr);
   fprintf(stderr, "ASCII code %d, char:%c\n", static_cast<int>(x),
           static_cast<char>(x));

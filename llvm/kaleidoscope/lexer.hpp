@@ -30,6 +30,8 @@ enum class ReservedToken : Token {
   token_whitespace = ' ',
   token_comma = ',',
   token_semicolon = ';',
+  // assignment
+  token_assignment = '=',
   // binary operations
   token_operator_add = '+',
   token_operator_subtract = '-',
@@ -37,12 +39,17 @@ enum class ReservedToken : Token {
   token_operator_less = '<',
   // input
   token_new_line = '\n',
+  token_carriage_return = '\r',
+  token_comment = '#',
+  token_dot = '.',
   token_eof = -8,
-  // if flow control
+  // flow control
   token_then = -8,
   token_else = -9,
+  token_for = -10,
+  token_in = -11,
   // exit program
-  token_exit = -10
+  token_exit = -12
 };
 
 #define STRINGIFY(s) #s
@@ -54,6 +61,8 @@ keyword_token(extern)
 keyword_token(if)
 keyword_token(then)
 keyword_token(else);
+keyword_token(for);
+keyword_token(in);
 // clang-format on
 
 /**

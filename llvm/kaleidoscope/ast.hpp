@@ -126,6 +126,15 @@ struct ParserAST {
   std::unique_ptr<ExpressionAST> parse_if_expression();
 
   /**
+   * Parse for expression with syntax:
+   *    forexpr ::= 'for' identifier '=' expr ',' expr (',' expr)? 'in'
+   * expression
+   *
+   * @return a ExpressionAST
+   */
+  std::unique_ptr<ExpressionAST> parse_for_expression();
+
+  /**
    * Parse external n with syntax:
    *    external ::= 'extern' prototype
    *
@@ -151,7 +160,7 @@ struct ParserAST {
   std::unique_ptr<llvm::LLVMContext> llvm_context_;
   std::unique_ptr<llvm::IRBuilder<>> llvm_IR_builder_;
   std::unique_ptr<llvm::Module> llvm_module_;
-  std::map<std::string, llvm::Value *> function_arguments_;
+  std::map<std::string, llvm::Value *> variable_names_;
 
   std::unique_ptr<llvm::FunctionPassManager> function_pass_manager_;
   std::unique_ptr<llvm::LoopAnalysisManager> loop_analysis_manager_;
