@@ -1030,7 +1030,9 @@ void ParserAST::run() {
 #define DLLEXPORT
 #endif
 
-/// putchard - putchar that takes a double and returns 0.
+/**
+ * Print a character.
+ */
 extern "C" DLLEXPORT double putch(double x) {
   // fputc(static_cast<char>(x), stderr);
   fprintf(stderr, "ASCII code %d, char:%c\n", static_cast<int>(x),
