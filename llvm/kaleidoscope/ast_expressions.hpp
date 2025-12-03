@@ -9,6 +9,7 @@
 
 #include <llvm/IR/Function.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -35,11 +36,11 @@ struct ExpressionAST : IRCode {
  * Expression struct for numeric literals like "1.0".
  */
 struct NumberExpressionAST final : ExpressionAST {
-  explicit NumberExpressionAST(const ParserAST &parser_ast, double value);
+  explicit NumberExpressionAST(ParserAST &parser_ast, double value);
   llvm::Value *generate_IR_code() override;
 
   double value_;
-  const ParserAST &parser_ast_;
+  ParserAST &parser_ast_;
 };
 
 /**
@@ -57,14 +58,14 @@ struct VariableExpressionAST final : ExpressionAST {
  * Expression struct for a binary operator like "+".
  */
 struct BinaryExpressionAST final : ExpressionAST {
-  explicit BinaryExpressionAST(const ParserAST &parser_ast, Token op,
+  explicit BinaryExpressionAST(ParserAST &parser_ast, Token op,
                                std::unique_ptr<ExpressionAST> lhs,
                                std::unique_ptr<ExpressionAST> rhs);
   llvm::Value *generate_IR_code() override;
 
   ReservedToken operator_;
   std::unique_ptr<ExpressionAST> lhs_, rhs_;
-  const ParserAST &parser_ast_;
+  ParserAST &parser_ast_;
 };
 
 /**
@@ -88,7 +89,7 @@ struct CallExpressionAST final : ExpressionAST {
  * function takes).
  */
 struct FunctionPrototypeAST : IRCode {
-  FunctionPrototypeAST(const ParserAST &parser_ast, std::string name,
+  FunctionPrototypeAST(ParserAST &parser_ast, std::string name,
                        std::vector<std::string> arguments_names);
 
   // Note that llvm `Function` is a `Value` sub-class.
@@ -96,7 +97,7 @@ struct FunctionPrototypeAST : IRCode {
 
   std::string name_;
   std::vector<std::string> arguments_names_;
-  const ParserAST &parser_ast_;
+  ParserAST &parser_ast_;
 };
 
 /**

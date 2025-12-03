@@ -24,17 +24,13 @@ using ExpressionASTVariant =
  *
  */
 struct IRCodeGenerator {
-  const ParserAST &parser_ast_;
+  ParserAST &parser_ast_;
 
-  explicit IRCodeGenerator(const ParserAST &parser_ast);
+  explicit IRCodeGenerator(ParserAST &parser_ast);
 
   llvm::Value *operator()(const NumberExpressionAST &expression) const;
-  llvm::Value *operator()(const VariableExpressionAST &expression) const {
-    return {};
-  }
-  llvm::Value *operator()(const BinaryExpressionAST &expression) const {
-    return {};
-  }
+  llvm::Value *operator()(const VariableExpressionAST &expression) const;
+  llvm::Value *operator()(const BinaryExpressionAST &expression) const;
   llvm::Value *operator()(const CallExpressionAST &expression) const {
     return {};
   }

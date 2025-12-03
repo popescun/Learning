@@ -5,10 +5,8 @@
 #include "ast_expressions.hpp"
 #include "ir_code_generator.hpp"
 
-#include <string>
 #include <utility>
 #include <variant>
-#include <vector>
 
 #include "ast_parser.hpp"
 
@@ -25,17 +23,11 @@ namespace toy {
 using namespace llvm;
 using namespace llvm::orc;
 
-namespace {}
-
-NumberExpressionAST::NumberExpressionAST(const ParserAST &parser_ast,
-                                         double value)
+NumberExpressionAST::NumberExpressionAST(ParserAST &parser_ast, double value)
     : value_{value}, parser_ast_{parser_ast} {}
 
 Value *NumberExpressionAST::generate_IR_code() {
-  // return ConstantFP::get(*parser_ast_.llvm_context_, APFloat(value_));
-
-  ExpressionASTVariant variant = {NumberExpressionAST{parser_ast_, value_}};
-  return std::visit(IRCodeGenerator{parser_ast_}, variant);
+  return std::visit(IRCodeGenerator{parser_ast_}, ExpressionASTVariant{*this});
 }
 
 VariableExpressionAST::VariableExpressionAST(ParserAST &parser_ast,
@@ -43,48 +35,22 @@ VariableExpressionAST::VariableExpressionAST(ParserAST &parser_ast,
     : name_{std::move(name)}, parser_ast_{parser_ast} {}
 
 Value *VariableExpressionAST::generate_IR_code() {
-  auto *variable = parser_ast_.variable_names_[name_];
-  if (!variable) {
-    parser_ast_.log_error("unknown variable name");
-    return {};
-  }
-  return variable;
+  return std::visit(IRCodeGenerator{parser_ast_}, ExpressionASTVariant{*this});
 }
 
-BinaryExpressionAST::BinaryExpressionAST(const ParserAST &parser_ast, Token op,
+BinaryExpressionAST::BinaryExpressionAST(ParserAST &parser_ast, Token op,
                                          std::unique_ptr<ExpressionAST> lhs,
                                          std::unique_ptr<ExpressionAST> rhs)
     : operator_{op}, lhs_{std::move(lhs)}, rhs_{std::move(rhs)},
       parser_ast_{parser_ast} {}
 Value *BinaryExpressionAST::generate_IR_code() {
-  auto *left = lhs_->generate_IR_code();
-  auto *right = rhs_->generate_IR_code();
-  if (!left || !right) {
-    return {};
-  }
-  switch (operator_) {
-  case ReservedToken::token_operator_add:
-    // Note: last param in `CreateFAdd` is `Twine` type:
-    // https://llvm.org/doxygen/classllvm_1_1Twine.html#details It's a faster
-    // representation of strings that uses a binary-tree instead of an array.
-    // See also: -
-    // https://www.geeksforgeeks.org/dsa/ropes-data-structure-fast-string-concatenation/
-    //           - https://stl.boost.org/Rope.html
-    return parser_ast_.llvm_IR_builder_->CreateFAdd(left, right, "addtmp");
-  case ReservedToken::token_operator_subtract:
-    return parser_ast_.llvm_IR_builder_->CreateFSub(left, right, "subtmp");
-  case ReservedToken::token_operator_multiply:
-    return parser_ast_.llvm_IR_builder_->CreateFMul(left, right, "multmp");
-  case ReservedToken::token_operator_less:
-    // store cmp result in `left`s
-    left = parser_ast_.llvm_IR_builder_->CreateFCmpULT(left, right, "cmptmp");
-    // convert result to double
-    return parser_ast_.llvm_IR_builder_->CreateUIToFP(
-        left, Type::getDoubleTy(*parser_ast_.llvm_context_), "booltmp");
-  default:
-    parser_ast_.log_error("invalid binary operator");
-    return {};
-  }
+  // ExpressionASTVariant variant =
+  //     BinaryExpressionAST{parser_ast_, Lexer::to_token(operator_),
+  //                         std::move(lhs_), std::move(rhs_)};
+  // todo: check if moving to the variant is robust, and does not leave anything
+  // dangling?
+  return std::visit(IRCodeGenerator{parser_ast_},
+                    ExpressionASTVariant{std::move(*this)});
 }
 
 CallExpressionAST::CallExpressionAST(
@@ -119,7 +85,7 @@ Value *CallExpressionAST::generate_IR_code() {
 }
 
 FunctionPrototypeAST::FunctionPrototypeAST(
-    const ParserAST &parser_ast, std::string name,
+    ParserAST &parser_ast, std::string name,
     std::vector<std::string> arguments_names)
     : name_{std::move(name)}, arguments_names_{std::move(arguments_names)},
       parser_ast_{parser_ast} {}
