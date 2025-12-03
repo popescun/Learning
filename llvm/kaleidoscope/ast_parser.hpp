@@ -2,9 +2,10 @@
 // Created by Nicolae Popescu on 11/11/2025.
 //
 
-#ifndef TOY_AST_HPP
-#define TOY_AST_HPP
+#ifndef TOY_AST_PARSER_HPP
+#define TOY_AST_PARSER_HPP
 
+#include "ast_expressions.hpp"
 #include "lexer.hpp"
 
 #include <llvm/Analysis/CGSCCPassManager.h>
@@ -17,17 +18,15 @@
 #include <llvm/IR/Value.h>
 #include <llvm/Passes/StandardInstrumentations.h>
 
+#include <map>
 #include <memory>
+#include <string>
 
 /**
  * Abstract Syntax Tree (aka Parse Tree).
  */
 
 namespace toy {
-
-struct ExpressionAST;
-struct FunctionPrototypeAST;
-struct FunctionDefinitionAST;
 
 struct Jit;
 
@@ -142,7 +141,7 @@ struct ParserAST {
    */
   std::unique_ptr<FunctionPrototypeAST> parse_external();
 
-  llvm::Function *get_function(const std::string &name) const;
+  [[nodiscard]] llvm::Function *get_function(const std::string &name) const;
 
   void handle_function_definition();
   void handle_extern();
@@ -161,6 +160,8 @@ struct ParserAST {
   std::unique_ptr<llvm::IRBuilder<>> llvm_IR_builder_;
   std::unique_ptr<llvm::Module> llvm_module_;
   std::map<std::string, llvm::Value *> variable_names_;
+  std::map<std::string, std::unique_ptr<FunctionPrototypeAST>>
+      function_prototypes_;
 
   std::unique_ptr<llvm::FunctionPassManager> function_pass_manager_;
   std::unique_ptr<llvm::LoopAnalysisManager> loop_analysis_manager_;
@@ -175,4 +176,4 @@ struct ParserAST {
 
 } // namespace toy
 
-#endif // TOY_AST_HPP
+#endif // TOY_AST_PARSER_HPP

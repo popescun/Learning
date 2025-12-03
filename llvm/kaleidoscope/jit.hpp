@@ -5,7 +5,7 @@
 #ifndef TOY_JIT_HPP
 #define TOY_JIT_HPP
 
-#include "ast.hpp"
+#include "ast_parser.hpp"
 
 #include <llvm/ExecutionEngine/Orc/Core.h>
 #include <llvm/ExecutionEngine/Orc/IRCompileLayer.h>
