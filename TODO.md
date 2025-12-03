@@ -1,0 +1,2 @@
+- check std::invoke
+- check std::monostate for std::variant
