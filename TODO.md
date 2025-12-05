@@ -1,2 +1,3 @@
 - check std::invoke
 - check std::monostate for std::variant
+- add github action to kaleidoscope project
