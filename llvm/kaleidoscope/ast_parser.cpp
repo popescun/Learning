@@ -525,9 +525,21 @@ void ParserAST::handle_function_definition() {
       // :
       //   "Duplication of symbols in separate modules is not allowed since
       //   LLVM-9"
-      ExitOnErr(jit_.addModule(
+      // ExitOnErr(jit_.addModule(
+      //     ThreadSafeModule(std::move(llvm_module_),
+      //     std::move(llvm_context_)), resource_tracker));
+
+      auto error = jit_.addModule(
           ThreadSafeModule(std::move(llvm_module_), std::move(llvm_context_)),
-          resource_tracker));
+          resource_tracker);
+      if (error) {
+        log_error("failed to add module");
+        // moving llvm::Error somehow make llvm to not crash on duplication
+        // symbol, with error:
+        //    Program aborted due to an unhandled Error:
+        //    In ToyJIT, duplicate definition of symbol '_foo'
+        log_error(toString(std::move(error)).c_str());
+      }
       init();
     }
   }
@@ -564,21 +576,30 @@ void ParserAST::handle_top_level_expression() {
       const auto resource_tracker = jit_.jit_dylib_.createResourceTracker();
       auto thread_safe_module =
           ThreadSafeModule(std::move(llvm_module_), std::move(llvm_context_));
-      ExitOnErr(
-          jit_.addModule(std::move(thread_safe_module), resource_tracker));
+      auto error =
+          jit_.addModule(std::move(thread_safe_module), resource_tracker);
+      if (error) {
+        log_error("failed to add module");
+        log_error(toString(std::move(error)).c_str());
+      }
+
       // llvm module once added it cannot be modified, so it's safe to
       // re-initialize
       init();
 
       // search the Jit for __anon_expr symbol
-      const auto expression_symbol =
-          ExitOnErr(jit_.lookup(kAnonymousExpression));
-
-      // get the symbol's address and cast it to the right type (takes no
-      // arguments, returns a double) so we can call it as a native function.
-      double (*function_pointer)() =
-          expression_symbol.getAddress().toPtr<double (*)()>();
-      fprintf(stderr, "evaluated to %f\n", function_pointer());
+      auto expected_symbol = jit_.lookup(kAnonymousExpression);
+      if (!expected_symbol) {
+        log_error("anonymous symbol not found");
+        auto expected_error = expected_symbol.takeError();
+        log_error(toString(std::move(expected_error)).c_str());
+      } else {
+        // get the symbol's address and cast it to the right type (takes no
+        // arguments, returns a double) so we can call it as a native function.
+        double (*function_pointer)() =
+            expected_symbol->getAddress().toPtr<double (*)()>();
+        fprintf(stderr, "evaluated to %f\n", function_pointer());
+      }
 
       // delete the module containing anonymous expression from Jit
       ExitOnErr(resource_tracker->remove());
@@ -618,7 +639,11 @@ void ParserAST::run() {
       lexer_.next_token();
       break;
     case ReservedToken::token_function_definition:
-      handle_function_definition();
+      try {
+        handle_function_definition();
+      } catch (const std::exception &e) {
+        log_error(e.what());
+      }
       break;
     case ReservedToken::token_external_function:
       handle_extern();
@@ -646,9 +671,9 @@ void ParserAST::run() {
  * Print a character.
  */
 extern "C" DLLEXPORT double putch(double x) {
-  // fputc(static_cast<char>(x), stderr);
-  fprintf(stderr, "ASCII code %d, char:%c\n", static_cast<int>(x),
-          static_cast<char>(x));
+  fputc(static_cast<char>(x), stderr);
+  // fprintf(stderr, "ASCII code %d, char:%c\n", static_cast<int>(x),
+  //         static_cast<char>(x));
   return 0;
 }
 
