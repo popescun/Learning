@@ -34,19 +34,22 @@ enum class ReservedToken : Token {
   token_operator_subtract = '-',
   token_operator_multiply = '*',
   token_operator_less = '<',
+  // helper tokens for user defined operators in the language standard library!
+  token_binary = -7,
+  token_unary = -8,
   // input
   token_new_line = '\n',
   token_carriage_return = '\r',
   token_comment = '#',
   token_dot = '.',
-  token_eof = -8,
+  token_eof = -9,
   // flow control
-  token_then = -8,
-  token_else = -9,
-  token_for = -10,
-  token_in = -11,
+  token_then = -10,
+  token_else = -11,
+  token_for = -12,
+  token_in = -13,
   // exit program
-  token_exit = -12
+  token_exit = -14
 };
 
 #define STRINGIFY(s) #s
@@ -60,6 +63,12 @@ enum class ReservedToken : Token {
   keyword_token(else);
   keyword_token(for);
   keyword_token(in);
+  // helper keywords for user defined operators in the language standard library!
+  // From doc: Many languages aspire to being able to implement their standard
+  // runtime library in the language itself. In Kaleidoscope, we can implement
+  // significant parts of the language in the library!
+  keyword_token(binary);
+  keyword_token(unary);
 
 } // namespace toy
 

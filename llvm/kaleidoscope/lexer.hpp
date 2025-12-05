@@ -63,11 +63,13 @@ struct Lexer {
   std::string identifier_{"none"};
   // filled in if token_number
   double number_value_{0};
+  // todo: should move to the AST parser?
   using BinaryOperationPrecedence = std::map<Token, Token>;
   // this holds the precedence for each binary operator token that is defined.
   // Install standard binary operators, first has the lowest precedence.
+  // Range: 0..100
   BinaryOperationPrecedence binary_op_precedence_ = {
-      {'<', 10}, {'+', 20}, {'-', 20}, {'*', 40}};
+      {'m', -1}, {'<', 10}, {'+', 20}, {'-', 20}, {'*', 40}, {'M', 101}};
   // track where current token position
   std::uint32_t row_{1};
   std::uint32_t col_{0};

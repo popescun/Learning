@@ -13,8 +13,9 @@ namespace toy {
 
 using ExpressionASTVariant =
     std::variant<NumberExpressionAST, VariableExpressionAST,
-                 BinaryExpressionAST, CallExpressionAST, FunctionPrototypeAST,
-                 FunctionDefinitionAST, IfExpressionAST, ForExpressionAST>;
+                 BinaryExpressionAST, UnaryExpressionAST, CallExpressionAST,
+                 FunctionPrototypeAST, FunctionDefinitionAST, IfExpressionAST,
+                 ForExpressionAST>;
 
 /**
  * IR code generator as function object.
@@ -31,21 +32,12 @@ struct IRCodeGenerator {
   llvm::Value *operator()(const NumberExpressionAST &expression) const;
   llvm::Value *operator()(const VariableExpressionAST &expression) const;
   llvm::Value *operator()(const BinaryExpressionAST &expression) const;
-  llvm::Value *operator()(const CallExpressionAST &expression) const {
-    return {};
-  }
-  llvm::Value *operator()(const FunctionPrototypeAST &expression) const {
-    return {};
-  }
-  llvm::Value *operator()(const FunctionDefinitionAST &expression) const {
-    return {};
-  }
-  llvm::Value *operator()(const IfExpressionAST &expression) const {
-    return {};
-  }
-  llvm::Value *operator()(const ForExpressionAST &expression) const {
-    return {};
-  }
+  llvm::Value *operator()(const UnaryExpressionAST &expression) const;
+  llvm::Value *operator()(const CallExpressionAST &expression) const;
+  llvm::Value *operator()(const FunctionPrototypeAST &expression) const;
+  llvm::Value *operator()(const FunctionDefinitionAST &expression) const;
+  llvm::Value *operator()(const IfExpressionAST &expression) const;
+  llvm::Value *operator()(const ForExpressionAST &expression) const;
 };
 
 } // namespace toy

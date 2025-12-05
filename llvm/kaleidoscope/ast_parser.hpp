@@ -76,7 +76,7 @@ struct ParserAST {
 
   /**
    * Parse binary operation right hand side with syntax:
-   *  binoprhs ::= ('+' primary)*
+   *  binoprhs ::= ('+' unary)* // * means recursion
    *
    * @return an ExpressionAST`
    */
@@ -85,8 +85,18 @@ struct ParserAST {
                              std::unique_ptr<ExpressionAST> lhs);
 
   /**
+   * Parse unary expression with syntax:
+   *  unary
+   *    ::= primary
+   *    ::= '!' unary
+   *
+   * @return an ExpressionAST`
+   */
+  std::unique_ptr<ExpressionAST> parse_unary_expression();
+
+  /**
    * Parse an expression with syntax:
-   *    expression ::= primary binoprhs
+   *    expression ::= unary binoprhs
    *
    * @return an ExpressionAST
    */
@@ -95,6 +105,8 @@ struct ParserAST {
   /**
    * Parse a function prototype with syntax:
    *    prototype ::= id '(' id* ')'
+   *              ::= binary LETTER number? (id, id)
+   *              ::= unary LETTER (id)
    *
    * @return a FunctionPrototypeAST
    */

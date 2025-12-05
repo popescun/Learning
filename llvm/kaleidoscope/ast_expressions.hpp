@@ -68,6 +68,17 @@ struct BinaryExpressionAST final : ExpressionAST {
   ParserAST &parser_ast_;
 };
 
+struct UnaryExpressionAST final : public ExpressionAST {
+  UnaryExpressionAST(ParserAST &parser_ast, std::uint8_t operation_code,
+                     std::unique_ptr<ExpressionAST> operand);
+
+  llvm::Value *generate_IR_code() override;
+
+  ParserAST &parser_ast_;
+  std::uint8_t operation_code_;
+  std::unique_ptr<ExpressionAST> operand_;
+};
+
 /**
  * Expression struct for function calls.
  */
@@ -90,13 +101,22 @@ struct CallExpressionAST final : ExpressionAST {
  */
 struct FunctionPrototypeAST : IRCode {
   FunctionPrototypeAST(ParserAST &parser_ast, std::string name,
-                       std::vector<std::string> arguments_names);
+                       std::vector<std::string> arguments_names,
+                       bool is_operator = false,
+                       std::uint8_t binary_operator_precedence = 0);
 
   // Note that llvm `Function` is a `Value` sub-class.
-  llvm::Function *generate_IR_code() override;
+  llvm::Value *generate_IR_code() override;
+
+  [[nodiscard]] bool is_unary_operator() const;
+  [[nodiscard]] bool is_binary_operator() const;
+  [[nodiscard]] char get_operator_name() const;
+  [[nodiscard]] std::uint8_t get_binary_operator_precedence() const;
 
   std::string name_;
   std::vector<std::string> arguments_names_;
+  bool is_operator_;
+  std::uint8_t binary_operator_precedence_;
   ParserAST &parser_ast_;
 };
 
@@ -108,22 +128,10 @@ struct FunctionDefinitionAST : IRCode {
                         std::unique_ptr<FunctionPrototypeAST> prototype,
                         std::unique_ptr<ExpressionAST> body);
 
-  /**
-   * todo: This code does have a bug, though:
-   * If the FunctionAST::codegen() method finds an existing IR Function, it does
-   * not validate its signature against the definition’s own prototype. This
-   * means that an earlier ‘extern’ declaration will take precedence over the
-   * function definition’s signature, which can cause codegen to fail, for
-   * instance if the function arguments are named differently. There are a
-   * number of ways to fix this bug, see what you can come up with! Here is a
-   * testcase:
-   *     - extern foo(a);     # ok, defines foo.
-   *     - def foo(b) b;      # Error: Unknown variable name. (decl using 'a'
-   * takes precedence).
-   */
-  llvm::Function *generate_IR_code() override;
+  llvm::Value *generate_IR_code() override;
 
   std::unique_ptr<FunctionPrototypeAST> prototype_;
+  std::string prototype_name_{"none"};
   std::unique_ptr<ExpressionAST> body_;
   ParserAST &parser_ast_;
 };

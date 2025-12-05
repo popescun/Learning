@@ -114,7 +114,7 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_identifier_expression() {
   if (lexer_.current_token_ !=
       Lexer::to_token(ReservedToken::token_trailing_parenthesis)) {
     while (true) {
-      if (auto argument = parse_primary_expression()) {
+      if (auto argument = parse_expression()) {
         arguments.push_back(std::move(argument));
       } else {
         return {};
@@ -177,8 +177,8 @@ ParserAST::parse_binary_operation_rhs(Token expression_precedence,
     // eat binop
     lexer_.next_token();
 
-    // parse the primary expression after the binary operator
-    auto rhs = parse_primary_expression();
+    // parse the unary expression after the binary operator
+    auto rhs = parse_unary_expression();
     if (!rhs) {
       return {};
     }
@@ -200,8 +200,31 @@ ParserAST::parse_binary_operation_rhs(Token expression_precedence,
   }
 }
 
+std::unique_ptr<ExpressionAST> ParserAST::parse_unary_expression() {
+  // if the current token is not an operator, it must be ap primary expression
+  if (!isascii(lexer_.current_token_) ||
+      lexer_.current_token_ ==
+          Lexer::to_token(ReservedToken::token_leading_parenthesis) ||
+      // todo: checking comma token might be wrong as it is used in function
+      // prototype as well?
+      lexer_.current_token_ == Lexer::to_token(ReservedToken::token_comma)) {
+    return parse_primary_expression();
+  }
+
+  // if this is a unary operator, read it
+  auto operation_code = lexer_.current_token_;
+  // eat the operation code
+  lexer_.next_token();
+  if (auto operand = parse_unary_expression()) {
+    return std::make_unique<UnaryExpressionAST>(*this, operation_code,
+                                                std::move(operand));
+  }
+
+  return {};
+}
+
 std::unique_ptr<ExpressionAST> ParserAST::parse_expression() {
-  auto lhs = parse_primary_expression();
+  auto lhs = parse_unary_expression();
   if (!lhs) {
     return {};
   }
@@ -209,14 +232,60 @@ std::unique_ptr<ExpressionAST> ParserAST::parse_expression() {
 }
 
 std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_function_prototype() {
-  if (lexer_.current_token_ !=
-      Lexer::to_token(ReservedToken::token_identifier)) {
+  std::string function_name;
+  std::uint8_t type{0}; // 0 = identifier, 1 = unary, 2 = binary
+  std::uint8_t binary_operator_precedence{30};
+
+  switch (Lexer::to_reserved_token(lexer_.current_token_)) {
+  case ReservedToken::token_identifier:
+    function_name = lexer_.identifier_;
+    type = 0;
+    // eat identifier
+    lexer_.next_token();
+    break;
+  case ReservedToken::token_unary:
+    // eat "unary"
+    lexer_.next_token();
+    if (!isascii(lexer_.current_token_)) {
+      log_error_prototype("expected unary operator");
+      return {};
+    }
+    function_name = keyword_token_unary;
+    function_name += static_cast<char>(lexer_.current_token_);
+    type = 1;
+    // eat operator
+    lexer_.next_token();
+    break;
+  case ReservedToken::token_binary:
+    // eat "binary"
+    lexer_.next_token();
+    if (!isascii(lexer_.current_token_)) {
+      log_error_prototype("expected binary operator");
+      return {};
+    }
+    function_name = keyword_token_binary;
+    function_name += static_cast<char>(lexer_.current_token_);
+    type = 2;
+    // eat binary operator
+    lexer_.next_token();
+
+    // read the precedence if present
+    if (lexer_.current_token_ == Lexer::to_token(ReservedToken::token_number)) {
+      if (lexer_.number_value_ <= lexer_.binary_op_precedence_['m'] ||
+          lexer_.number_value_ >= lexer_.binary_op_precedence_['M']) {
+        log_error_prototype("invalid precedence: must be 1..100");
+        return {};
+      }
+      binary_operator_precedence =
+          static_cast<std::uint8_t>(lexer_.number_value_);
+      // eat the precedence number
+      lexer_.next_token();
+    }
+    break;
+  default:
     log_error_prototype("expected function name in prototype");
     return {};
   }
-
-  auto function_name = lexer_.identifier_;
-  lexer_.next_token();
 
   if (lexer_.current_token_ !=
       Lexer::to_token(ReservedToken::token_leading_parenthesis)) {
@@ -260,17 +329,24 @@ std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_function_prototype() {
   // eat ending ')'
   lexer_.next_token();
 
+  // verify right number of operands for operator
+  if (type && arguments_names.size() != type) {
+    log_error_prototype("invalid number of operands for operator");
+    return {};
+  }
+
   // todo: function_name is first copied into constructor and then moved
   // should we move all along? Then last identifier_ is lost in lexer.
-  return std::make_unique<FunctionPrototypeAST>(*this, function_name,
-                                                std::move(arguments_names));
+  return std::make_unique<FunctionPrototypeAST>(
+      *this, function_name, std::move(arguments_names), type != 0,
+      binary_operator_precedence);
 }
 
 std::unique_ptr<FunctionDefinitionAST> ParserAST::parse_function_definition() {
   // eat 'def'
   lexer_.next_token();
 
-  // signature
+  // parse function prototype
   auto function_prototype = parse_function_prototype();
   if (!function_prototype) {
     return {};
@@ -426,7 +502,9 @@ Function *ParserAST::get_function(const std::string &name) const {
   // prototype
   auto it = function_prototypes_.find(name);
   if (it != function_prototypes_.end()) {
-    return it->second->generate_IR_code();
+    // cast Value* to Function*
+    // todo: is there a llvm cast function?
+    return reinterpret_cast<Function *>(it->second->generate_IR_code());
   }
 
   // if no existing prototype exists, return null
@@ -571,5 +649,13 @@ extern "C" DLLEXPORT double putch(double x) {
   // fputc(static_cast<char>(x), stderr);
   fprintf(stderr, "ASCII code %d, char:%c\n", static_cast<int>(x),
           static_cast<char>(x));
+  return 0;
+}
+
+/**
+ * printf that takes a double prints it as "%f\n", returning 0.
+ */
+extern "C" DLLEXPORT double printd(double x) {
+  fprintf(stderr, "%f\n", x);
   return 0;
 }

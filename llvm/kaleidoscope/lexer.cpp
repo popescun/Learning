@@ -76,6 +76,16 @@ void Lexer::next_token() {
       return;
     }
 
+    if (identifier_ == keyword_token_unary) {
+      current_token_ = to_token(ReservedToken::token_unary);
+      return;
+    }
+
+    if (identifier_ == keyword_token_binary) {
+      current_token_ = to_token(ReservedToken::token_binary);
+      return;
+    }
+
     // otherwise is an identifier
     current_token_ = to_token(ReservedToken::token_identifier);
     return;
