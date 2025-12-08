@@ -105,15 +105,9 @@ FunctionDefinitionAST::FunctionDefinitionAST(
     ParserAST &parser_ast, std::unique_ptr<FunctionPrototypeAST> prototype,
     std::unique_ptr<ExpressionAST> body)
     : prototype_{std::move(prototype)}, body_{std::move(body)},
-      parser_ast_{parser_ast} {}
+      parser_ast_{parser_ast}, prototype_name_(prototype_->name_) {}
 
 Value *FunctionDefinitionAST::generate_IR_code() {
-  // first, transfer ownership of the prototype to function prototypes map,
-  // but keep a reference to it for use bellow
-  // todo: can this piece of code move to the visitor?
-  prototype_name_ = prototype_->name_;
-  parser_ast_.function_prototypes_[prototype_name_] = std::move(prototype_);
-
   return std::visit(IRCodeGenerator{parser_ast_},
                     ExpressionASTVariant{std::move(*this)});
 }

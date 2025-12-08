@@ -30,7 +30,9 @@ IRCodeGenerator::operator()(const VariableExpressionAST &expression) const {
 
 Value *
 IRCodeGenerator::operator()(const BinaryExpressionAST &expression) const {
+
   auto *left = expression.lhs_->generate_IR_code();
+  // auto * left1 = operator()(*expression.lhs_);
   auto *right = expression.rhs_->generate_IR_code();
   if (!left || !right) {
     return {};

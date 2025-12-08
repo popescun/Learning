@@ -2,6 +2,8 @@
 // Created by Nicolae Popescu on 11/11/2025.
 //
 
+#include <functional>
+
 #include "ast_expressions.hpp"
 #include "jit.hpp"
 
@@ -14,6 +16,8 @@
 #include <llvm/Transforms/Scalar/GVN.h>
 #include <llvm/Transforms/Scalar/Reassociate.h>
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
+
+#include "ir_code_generator.hpp"
 
 namespace toy {
 
@@ -492,7 +496,7 @@ std::unique_ptr<FunctionPrototypeAST> ParserAST::parse_external() {
   return parse_function_prototype();
 }
 
-Function *ParserAST::get_function(const std::string &name) const {
+Function *ParserAST::get_function(const std::string &name) {
   // first, see if the function is present in the module
   if (auto *function = llvm_module_->getFunction(name)) {
     return function;
@@ -504,7 +508,11 @@ Function *ParserAST::get_function(const std::string &name) const {
   if (it != function_prototypes_.end()) {
     // cast Value* to Function*
     // todo: is there a llvm cast function?
-    return reinterpret_cast<Function *>(it->second->generate_IR_code());
+    if (it->second) {
+      return reinterpret_cast<Function *>(it->second->generate_IR_code());
+    }
+
+    log_error("function prototype gen code failed");
   }
 
   // if no existing prototype exists, return null
@@ -513,6 +521,11 @@ Function *ParserAST::get_function(const std::string &name) const {
 
 void ParserAST::handle_function_definition() {
   if (const auto function_definition = parse_function_definition()) {
+    // todo: duplicate code, extract it to a function
+    // first, transfer ownership of the prototype to function prototypes map,
+    // but keep a reference to it for use bellow
+    function_prototypes_[function_definition->prototype_name_] =
+        std::move(function_definition->prototype_);
     if (const auto *ir_code = function_definition->generate_IR_code()) {
       fprintf(stderr, "parsed a function definition\n");
       ir_code->print(errs());
@@ -567,7 +580,11 @@ void ParserAST::handle_extern() {
 void ParserAST::handle_top_level_expression() {
   // evaluate a top-level expression into anonymous function
   if (const auto function_definition = parse_top_level_expression()) {
-    if (const auto *ir_code = function_definition->generate_IR_code()) {
+    // first, transfer ownership of the prototype to function prototypes map,
+    // but keep a reference to it for use bellow
+    function_prototypes_[function_definition->prototype_name_] =
+        std::move(function_definition->prototype_);
+    if (const auto ir_code = function_definition->generate_IR_code()) {
       fprintf(stderr, "parsed a top level expression\n");
       ir_code->print(errs());
       fprintf(stderr, "\n");

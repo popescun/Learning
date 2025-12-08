@@ -153,7 +153,7 @@ struct ParserAST {
    */
   std::unique_ptr<FunctionPrototypeAST> parse_external();
 
-  [[nodiscard]] llvm::Function *get_function(const std::string &name) const;
+  [[nodiscard]] llvm::Function *get_function(const std::string &name);
 
   void handle_function_definition();
   void handle_extern();
