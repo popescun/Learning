@@ -1,6 +1,0 @@
-build
-visualize.sh
-t.ll
-*.dot
-*.as
-*.png
