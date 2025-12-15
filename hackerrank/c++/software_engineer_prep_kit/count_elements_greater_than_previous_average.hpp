@@ -11,6 +11,17 @@ namespace count_elements_greater_than_previous_average {
 using namespace std;
 
 /*
+ * Count Elements Greater Than Previous Average
+ *
+ * Given an array of positive integers, return the number of elements that are
+ * strictly greater than the average of all previous elements. Skip the first
+ * element. Example
+ *
+ *   Input
+ *     responseTimes = [100, 200, 150,300]
+ *   Output
+ *     2
+ *
  * Complete the 'countResponseTimeRegressions' function below.
  *
  * The function is expected to return an INTEGER.
@@ -21,16 +32,17 @@ inline int countResponseTimeRegressions(vector<int> responseTimes) {
   uint64_t sum = 0;
   int count = 0;
   int index = -1;
-  for (const auto& element : responseTimes) {
+  for (const auto &element : responseTimes) {
     ++index;
     uint64_t average = 0;
     if (index > 0) {
       average = sum / index;
     }
-    cout << index << ":" << average << endl;
-    if ( index > 0 && element > average) {
+    if (average > 0 && element > average) {
       ++count;
     }
+    cout << index << ": " << element << ", " << average << ", " << count
+         << endl;
     sum += element;
   }
   return count;

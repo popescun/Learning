@@ -27,7 +27,7 @@ inline string timeConversion(string s) {
     // 12AM -> 11AM, 00 -> 11
     const auto h = stoi(hh);
     const auto check = h == 12 ? 0 : h;
-    if ( check > 11) {
+    if (check > 11) {
       throw std::runtime_error("Invalid hh");
     }
     hh = h == 12 ? "00" : hh;
@@ -35,7 +35,7 @@ inline string timeConversion(string s) {
   } else if (day_part == "PM") {
     // 12PM -> 11PM =  12 -> 23
     auto h = stoi(hh);
-    if ( h != 12 && h > 11) {
+    if (h != 12 && h > 11) {
       throw std::runtime_error("Invalid hh");
     }
     h = h == 12 ? h : h + 12;
@@ -47,7 +47,7 @@ inline string timeConversion(string s) {
 }
 
 inline void test() {
-  constexpr auto s {"12:40:22AM"};
+  constexpr auto s{"12:40:22AM"};
 
   const auto result = timeConversion(s);
 

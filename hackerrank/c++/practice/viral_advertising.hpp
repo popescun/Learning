@@ -18,7 +18,7 @@ using namespace std;
  */
 
 inline int viralAdvertising(int n) {
-  int shares {5};
+  int shares{5};
   int total_likes{0};
   while (n--) {
     int likes = floor(shares / 2);
@@ -28,7 +28,5 @@ inline int viralAdvertising(int n) {
   return total_likes;
 }
 
-inline void test() {
-  cout << viralAdvertising(3) << endl;
-}
+inline void test() { cout << viralAdvertising(3) << endl; }
 } // namespace viral_advertising

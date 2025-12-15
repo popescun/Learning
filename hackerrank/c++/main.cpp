@@ -4,7 +4,10 @@
 #include "practice/birthday_cake_candles.hpp"
 #include "practice/viral_advertising.hpp"
 #include "practice/grading_students.hpp"
+#include "practice/cycle_sort.hpp"
 #include "software_engineer_prep_kit/count_elements_greater_than_previous_average.hpp"
+#include "software_engineer_prep_kit/find_smallest_missing_positive_integer.hpp"
+#include "live/live.hpp"
 
 int main() {
   // time_conversion::test();
@@ -13,7 +16,11 @@ int main() {
   // birthday_cake_candles::test();
   // viral_advertising::test();
   // grading_students::test();
-  count_elements_greater_than_previous_average::test();
-  return 0;
+  cycle_sort::test();
 
+  // prep kit
+  // count_elements_greater_than_previous_average::test();
+  // find_smallest_missing_positive_integer::test();
+  // live::test();
+  return 0;
 }

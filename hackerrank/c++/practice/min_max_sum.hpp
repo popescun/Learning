@@ -16,9 +16,9 @@ using namespace std;
  */
 
 inline void miniMaxSum(vector<uint64_t> arr) {
-  uint64_t min {numeric_limits<uint64_t>::max()}, max {0};
+  uint64_t min{numeric_limits<uint64_t>::max()}, max{0};
   for (size_t i = 0; i < arr.size(); ++i) {
-    uint64_t temp {0};
+    uint64_t temp{0};
     for (size_t j = 0; j < arr.size(); ++j) {
       if (i == j) {
         continue;
