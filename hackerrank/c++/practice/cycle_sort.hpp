@@ -5,13 +5,16 @@
 #pragma once
 
 #include <iostream>
+#include <vector>
 
 namespace cycle_sort {
 
 using namespace std;
 
-// 41 lines
 inline void cycle_sort(std::vector<int> &numbers) {
+  if (numbers.empty()) {
+    return;
+  }
   int writes{0};
   for (int i = 0; i < numbers.size() - 1; ++i) {
     int position{i};
@@ -51,11 +54,13 @@ inline void cycle_sort(std::vector<int> &numbers) {
     }
   }
 
-  cout << "writes:" << writes << endl;
+  // cout << "writes:" << writes << endl;
 }
 
-// 47 lines
 inline void cycle_sort_2(std::vector<int> &numbers) {
+  if (numbers.empty()) {
+    return;
+  }
   int writes{0};
   const auto n = static_cast<int>(numbers.size());
   for (int i = 0; i < n - 1; ++i) {
@@ -76,8 +81,8 @@ inline void cycle_sort_2(std::vector<int> &numbers) {
     }
 
     // if (pos != i) { //todo: this might be redundant?
-      swap(item, numbers[pos]);
-      writes += 2;
+    swap(item, numbers[pos]);
+    writes += 2;
     // }
 
     // rotate rest of the cycle until there is no need for moving
@@ -130,6 +135,13 @@ inline void test() {
   cycle_sort(numbers);
   print();
   numbers = {10, 9, 8, 7, 4, 5, 3, 2, 1, 0};
+  cycle_sort_2(numbers);
+  print();
+
+  numbers = {};
+  cycle_sort(numbers);
+  print();
+  numbers = {};
   cycle_sort_2(numbers);
   print();
 }
