@@ -8,6 +8,7 @@
 #include "practice/viral_advertising.hpp"
 #include "software_engineer_prep_kit/count_elements_greater_than_previous_average.hpp"
 #include "software_engineer_prep_kit/find_smallest_missing_positive_integer.hpp"
+#include "software_engineer_prep_kit/merge_and_sort_intervals.hpp"
 
 int main() {
   // time_conversion::test();
@@ -20,7 +21,8 @@ int main() {
 
   // prep kit
   // count_elements_greater_than_previous_average::test();
-  find_smallest_missing_positive_integer::test();
-  live::test();
+  // find_smallest_missing_positive_integer::test();
+  // live::test();
+  merge_and_sort_intervals::test();
   return 0;
 }
