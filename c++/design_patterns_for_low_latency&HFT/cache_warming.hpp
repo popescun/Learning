@@ -79,12 +79,18 @@ inline void test() {
   ::benchmark::RunSpecifiedBenchmarks();
   ::benchmark::Shutdown();
 
-  // todo: for some reason the time is not the same as in the google benchmark
+  std::cout << std::fixed << "BM_CacheCold:"
+            << measure_cold.get_accumulated_time_ns() / measure_cold.iterations_
+            << " ns; iterations:" << measure_cold.iterations_ << std::endl;
+  std::cout << std::fixed << "BM_CacheWarm:"
+            << measure_warm.get_accumulated_time_ns() / measure_warm.iterations_
+            << " ns; iterations:" << measure_warm.iterations_ << std::endl;
+
   std::cout << std::fixed
-            << "BM_CacheCold:" << measure_cold.get_accumulated_time_ns()
+            << "BM_CacheCold last iteration:" << measure_cold.get_time_ns()
             << " ns" << std::endl;
   std::cout << std::fixed
-            << "BM_CacheWarm:" << measure_warm.get_accumulated_time_ns()
+            << "BM_CacheWarm last iteration:" << measure_warm.get_time_ns()
             << " ns" << std::endl;
 }
 } // namespace cache_warming

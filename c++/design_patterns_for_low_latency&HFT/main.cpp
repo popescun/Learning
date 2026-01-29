@@ -2,7 +2,7 @@
 #include "compile_time_dispatch.hpp"
 
 int main() {
-  cache_warming::test();
+  // cache_warming::test();
   compile_time_dispatch::test();
   return 0;
 }

@@ -46,10 +46,14 @@ struct measure_time {
   std::uint64_t start_{0};
   std::uint64_t time_{0};
   std::uint64_t accumulator_{0};
+  std::uint64_t iterations_{0};
 
   measure_time() { start(); }
 
-  void start() { start_ = clock_gettime_nsec_np(_CLOCK_MONOTONIC_RAW); }
+  void start() {
+    start_ = clock_gettime_nsec_np(_CLOCK_MONOTONIC_RAW);
+    ++iterations_;
+  }
   void stop() {
     time_ = clock_gettime_nsec_np(_CLOCK_MONOTONIC_RAW) - start_;
     accumulator_ += time_;
