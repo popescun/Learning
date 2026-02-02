@@ -8,3 +8,4 @@ octave
 build
 
 *.x
+*.o
