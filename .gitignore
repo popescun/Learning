@@ -6,3 +6,5 @@ octave
 .venv
 
 build
+
+*.x
