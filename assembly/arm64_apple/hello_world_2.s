@@ -11,7 +11,7 @@ _main:
 
   // exit
   mov x0, #0
-  mov x16, #1 // 1 is exit call
+  mov x16, #1 // 1 is terminate call
   svc #0x80
 
 hello_world: .ascii "hello, world!\n"
