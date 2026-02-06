@@ -10,3 +10,5 @@ build
 *.x
 *.o
 *.out
+
+__pycache__
