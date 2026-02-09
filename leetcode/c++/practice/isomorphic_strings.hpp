@@ -5,8 +5,10 @@
 #pragma once
 
 #include <iostream>
-#include <set>
 #include <unordered_map>
+#include <unordered_set>
+
+#include "../utils.hpp"
 
 namespace isomorphic_strings {
 using namespace std;
@@ -57,13 +59,40 @@ using namespace std;
  *      then the strings are not isomorphic.
  */
 
+/**
+ * Measurements revealed this algorithm is faster, especially for
+ * long strings.
+ */
 inline bool isIsomorphic(string s, string t) {
   if (s.size() != t.size() || s == t) {
     return false;
   }
 
   std::unordered_map<char, char> m;
-  std::set<char> values;
+
+  for (size_t i = 0; i < s.size(); ++i) {
+    bool m_contains_value =
+        std::find_if(m.begin(), m.end(), [&t, i](std::pair<char, char> p) {
+          return p.second == t[i];
+        }) != m.end();
+    // check existing key is re-mapped
+    if ((m.contains(s[i]) && m[s[i]] != t[i]) ||
+        // check existing value is re-mapped
+        (m_contains_value && !m.contains(s[i]))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+inline bool isIsomorphic_with_set(string s, string t) {
+  if (s.size() != t.size() || s == t) {
+    return false;
+  }
+
+  std::unordered_map<char, char> m;
+  std::unordered_set<char> values;
 
   for (size_t i = 0; i < s.size(); ++i) {
     // check existing key is re-mapped
@@ -75,38 +104,47 @@ inline bool isIsomorphic(string s, string t) {
     m[s[i]] = t[i];
     values.insert(t[i]);
   }
+
   return true;
 }
 
 inline void test() {
-  auto s = "egg";
-  auto t = "add";
-  auto print = [&]() {
-    std::cout << s << " and " << t << " are"
-              << (isIsomorphic(s, t) ? "" : " not") << " isomorphic"
-              << std::endl;
+  auto test = [](std::function<bool(std::string s, std::string t)> algo) {
+    std::cout << "=========================\n";
+    auto s = "egg";
+    auto t = "add";
+    auto print = [&]() {
+      utils::measure_time measure_time;
+      std::cout << s << " and " << t << " are" << (algo(s, t) ? "" : " not")
+                << " isomorphic\n";
+      measure_time.stop();
+      std::cout << "took: " << measure_time.get_time_ns() << std::endl;
+    };
+    print();
+    s = "f11";
+    t = "b23";
+    print();
+    s = "paper";
+    t = "title";
+    print();
+    s = "badc";
+    t = "baba";
+    print();
+    s = "bbbaaaba";
+    t = "aaabbbba";
+    print();
+    s = "papap";
+    t = "titii";
+    print();
+    s = "abab";
+    t = "baba";
+    print();
+    s = "qwertyuiop[]asdfghjkl;'\\zxcvbnm,./";
+    t = "',.pyfgcrl/=aoeuidhtns-\\;qjkxbmwvz";
+    print();
   };
-  print();
-  s = "f11";
-  t = "b23";
-  print();
-  s = "paper";
-  t = "title";
-  print();
-  s = "badc";
-  t = "baba";
-  print();
-  s = "bbbaaaba";
-  t = "aaabbbba";
-  print();
-  s = "papap";
-  t = "titii";
-  print();
-  s = "abab";
-  t = "baba";
-  print();
-  s = "qwertyuiop[]asdfghjkl;'\\zxcvbnm,./";
-  t = "',.pyfgcrl/=aoeuidhtns-\\;qjkxbmwvz";
-  print();
+
+  test(isomorphic_strings::isIsomorphic);
+  test(isomorphic_strings::isIsomorphic_with_set);
 }
 } // namespace isomorphic_strings
