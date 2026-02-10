@@ -45,4 +45,18 @@ s = 11.8
 print(f"Glider aspect ratio: {ar(b, s)}")
 print(f"Glider induced drag coefficient: {id(0.86, ar(b, s), e)}")
 
+# Propulsion
+
+# Alpha Jet
+t = 10000
+vj = 407.3
+m = 28.1
+# t = lambda m, vj, v: m * (vj - v)
+v = vj - t / m
+print(f"Alpha Jet flight speed: {v} [m/s]")
+print(f"Alpha Jet power available: {pa(m, vj, v)} [W]")
+print(f"Alpha Jet propulsive efficiency: {ej(vj, v)}")
+print(f"Alpha Jet jet power: {pj(m, vj, v)} [W]")
+et = 65.3
+print(f"Alpha Jet total efficiency: {ej(vj, v) * et}")
 

@@ -63,3 +63,61 @@ ar = lambda b, s: pow(b, 2) / s
 id = lambda  cl, a, e: pow(cl, 2) / (math.pi * a * e)
 cd = lambda cd0, cl, b, s, e: cd0 + id(cl, ar(b, s), e)
 
+# Propulsion
+"""
+    Trust of engine
+        m  - mass of air flow through the engine  [Kg]
+        vj - air speed behind engine [m/s]
+        v  - aircraft speed [m/s]
+"""
+t = lambda m, vj, v: m * (vj - v)
+
+"""
+    The available power [W]
+        m  - mass of air flow through the engine  [Kg]
+        vj - air speed behind engine [m/s]
+        v  - aircraft speed [m/s]
+"""
+pa = lambda m, vj, v: t(m, vj, v) * v
+
+"""
+    The thermal power [W]
+        mf - mass flow [Kg]
+        h  - amount of energy per unit of fuel
+"""
+q = lambda mf, h: mf  * h
+
+"""
+    Jet power: 
+        m  - mass of air flow through the engine  [Kg]
+        vj - air speed behind engine [m/s]
+        v  - aircraft speed [m/s]
+"""
+pj = lambda m, vj, v: m * pow(vj, 2) / 2 - m * pow(v, 2) / 2
+
+"""
+    Thermal efficiency
+        m  - mass of air flow through the engine  [Kg]
+        vj - air speed behind engine [m/s]
+        v  - aircraft speed [m/s]
+        mf - mass flow [Kg]
+        h  - amount of energy per unit of fuel
+"""
+et = lambda m, vj, v, mf, h: pj(m, vj, v) / q(mf, h)
+
+"""
+    Propulsive efficiency
+        vj - air speed behind engine [m/s]
+        v  - aircraft speed [m/s]
+"""
+ej = lambda vj, v: 2 / (1 + vj / v)
+
+"""
+    Total efficiency
+        m  - mass of air flow through the engine  [Kg]
+        vj - air speed behind engine [m/s]
+        v  - aircraft speed [m/s]
+        mf - mass flow [Kg]
+        h  - amount of energy per unit of fuel
+"""
+e = lambda m, vj, v, mf, h: et(m, vj, v, mf, h) * ej(vj, v)
