@@ -14,7 +14,5 @@ inline void thread_func(int i) {
   }
 }
 
-inline void test() {
-  std::jthread t(thread_func, 10);
-}
+inline void test() { std::jthread t(thread_func, 10); }
 } // namespace using_joinable_threads

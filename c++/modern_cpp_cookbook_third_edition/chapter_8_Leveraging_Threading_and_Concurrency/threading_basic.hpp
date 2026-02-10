@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <iomanip>
+#include <functional>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -73,8 +73,8 @@ inline void create_thread() {
   // detach
   std::thread t4([]() { std::cout << "thread detached" << std::endl; });
   std::cout << t4.joinable() << std::endl;
-  t4.detach(); // is not guaranteed will terminate before the process terminates
-               // we need a way to sync this
+  t4.detach(); // is not guaranteed will terminate before the process
+               // terminates we need a way to sync this
   std::cout << t4.joinable()
             << std::endl; // a detach thread is no longer joinable
 
@@ -99,4 +99,4 @@ inline void test() {
   print_time();
   create_thread();
 }
-} // namespace threading_and_concurrency
+} // namespace threading_basic
