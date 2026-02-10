@@ -4,9 +4,9 @@
 #include "shared_data_access_sync.hpp"
 
 int main() {
-  // threading_basic::test();
-  // using_joinable_threads::test();
-  // understanding_value_categories::test();
+  threading_basic::test();
+  using_joinable_threads::test();
+  understanding_value_categories::test();
   shared_data_access_sync::test();
   return 0;
 }

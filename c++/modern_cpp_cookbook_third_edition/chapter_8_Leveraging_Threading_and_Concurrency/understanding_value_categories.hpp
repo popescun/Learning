@@ -15,7 +15,7 @@
  * They are not categories of objects, variables or types.
  *
  *  - lvalue simply means an object that has an identifiable location in memory (i.e. having an address).
- *  - r-value simply means, an object that has no identifiable location in memory (i.e. having an address)
+ *  - rvalue simply means, an object that has no identifiable location in memory (i.e. having an address)
  *
  * references: - https://en.cppreference.com/w/cpp/language/value_category.html
  *             - https://www.geeksforgeeks.org/c/lvalue-and-rvalue-in-c-language/
