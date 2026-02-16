@@ -10,6 +10,20 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 project(chapter_8)
 
+# ASAN
+# this should be added before target is added
+#add_compile_options(-fsanitize=address)
+#add_link_options(-fsanitize=address)
+
 file(GLOB headers *.hpp)
 add_executable(${PROJECT_NAME} main.cpp ${headers})
 #include_directories(${CMAKE_SOURCE_DIR}/include)
+
+# ASAN
+# this should be added after target is added
+target_compile_options(${PROJECT_NAME} PUBLIC -fsanitize=address)
+target_link_options(${PROJECT_NAME} PUBLIC -fsanitize=address)
+
+# TSAN
+#target_compile_options(${PROJECT_NAME} PUBLIC -fsanitize=thread)
+#target_link_options(${PROJECT_NAME} PUBLIC -fsanitize=thread)

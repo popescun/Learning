@@ -76,7 +76,7 @@ inline void thread_func() {
         g_recursive_mutex}; // no dead-lock as the mutex is recursive
 
     print_time();
-    std::cout << "running thread with lock_guard" << std::this_thread::get_id()
+    std::cout << "running thread with lock_guard " << std::this_thread::get_id()
               << std::endl;
   }
 
@@ -98,7 +98,7 @@ inline void thread_func() {
     lock5.lock();                            // here g_mutex1 is locked
 
     print_time();
-    std::cout << "still running thread with unique_lock"
+    std::cout << "still running thread with unique_lock "
               << std::this_thread::get_id() << std::endl;
   }
 
@@ -116,7 +116,7 @@ inline void thread_func() {
         g_recursive_mutex}; // no dead_lock as the mutex is recursive
 
     print_time();
-    std::cout << "still running thread with scoped_lock"
+    std::cout << "still running thread with scoped_lock "
               << std::this_thread::get_id() << std::endl;
   }
 
@@ -127,7 +127,7 @@ inline void thread_func() {
     // step 2
     std::lock_guard<std::mutex> lock{g_mutex};
     print_time();
-    std::cout << "done in thread with lock_guard" << std::this_thread::get_id()
+    std::cout << "done in thread with lock_guard " << std::this_thread::get_id()
               << std::endl;
   }
 }
@@ -276,7 +276,7 @@ inline void test_multiple_shared_resource() {
 }
 
 inline void test() {
-  // test_single_shared_resource();
+  test_single_shared_resource();
   test_multiple_shared_resource();
 }
 } // namespace shared_data_access_sync
