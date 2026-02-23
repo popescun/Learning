@@ -18,17 +18,20 @@ C_atm = G / (LAMBDA * R)
 
 # air equations
 """
-    Air temperature
+    Air temperature [K]
         h - altitude in [m]
 """
 T = lambda h: T0 - 6.5 * pow(10, -3) * h
+
 """
-    Air pressure
+    Air pressure [N/m2]
         h - altitude in [m]
 """
 p = lambda h: P0 * pow(T(h) / T0, -C_atm)
+
+
 """
-    Air density
+    Air density [Kg/m3]
         h - altitude in [m]
 """
 d = lambda h: D0 * pow(T(h) / T0, -(C_atm + 1))
@@ -36,23 +39,30 @@ d = lambda h: D0 * pow(T(h) / T0, -(C_atm + 1))
 """
     Mass air flow
         h - altitude in [m]
-        fa - front surface in [m]
+        v - aircraft velocity in [m/s]
+        fa - front engine area in [m2]
+"""
+m_flow = lambda h, v, fa: d(h) * v * fa
+
+"""
+    The dynamic pressure of air [N/m2]
+        h - altitude in [m]
         v - aircraft velocity in [m/s]
 """
-m_flow = lambda h, fa, v: d(h) * fa * v
+p_dynamic = lambda h, v: d(h) * pow(v, 2) / 2
 
 # The lift
 """
-    Lift equation
+    Lift equation [N]
         cl - lift coefficient
         h  - altitude [m]
         v  - aircraft speed [m/s]
         s  - wing surface [m2] 
 """
-l = lambda cl, h, v, s: cl * d(h) * pow(v, 2) * s / 2
+l = lambda cl, h, v, s: cl * p_dynamic(h, v) * s
 
 # Lift coefficient
-cl = lambda l, h, v, s: 2 * l / (d(h) * pow(v, 2) * s)
+cl = lambda l, h, v, s: l / (p_dynamic(h, v) * s)
 
 # The drag
 """
@@ -62,7 +72,7 @@ cl = lambda l, h, v, s: 2 * l / (d(h) * pow(v, 2) * s)
         v  - aircraft speed [m/s]
         s  - wing surface [m2] 
 """
-dr = lambda cd, h, v, s: cd * d(h) * pow(v, 2) * s / 2
+dr = lambda cd, h, v, s: cd * p_dynamic(h, v) * s
 
 """
     Wing aspect ratio
@@ -86,19 +96,19 @@ cd = lambda cd0, cl, b, s, e: cd0 + id(cl, b, s, e)
 # Propulsion
 """
     Thrust of engine
-        m  - mass of air flow through the engine  [Kg]
-        vj - air speed behind engine [m/s]
+        mf  - mass of air flow through the engine  [Kg]
+        vj - exhaust jet speed. [m/s]
         v  - aircraft speed [m/s]
 """
-t = lambda m, vj, v: m * (vj - v)
+t = lambda mf, vj, v: mf * (vj - v)
 
 """
     The available power [W]
         m  - mass of air flow through the engine  [Kg]
-        vj - air speed behind engine [m/s]
+        vj - exhaust jet speed. [m/s]
         v  - aircraft speed [m/s]
 """
-pa = lambda m, vj, v: t(m, vj, v) * v
+pa = lambda mf, vj, v: t(mf, vj, v) * v
 
 """
     The required power [W]
@@ -119,7 +129,7 @@ q = lambda mf, h: mf  * h
 """
     Jet power: 
         m  - mass of air flow through the engine  [Kg]
-        vj - air speed behind engine [m/s]
+        vj - exhaust jet speed. [m/s]
         v  - aircraft speed [m/s]
 """
 pj = lambda m, vj, v: m * pow(vj, 2) / 2 - m * pow(v, 2) / 2
@@ -127,7 +137,7 @@ pj = lambda m, vj, v: m * pow(vj, 2) / 2 - m * pow(v, 2) / 2
 """
     Thermal efficiency
         m  - mass of air flow through the engine  [Kg]
-        vj - air speed behind engine [m/s]
+        vj - exhaust jet speed. [m/s]
         v  - aircraft speed [m/s]
         mf - mass flow [Kg]
         h  - amount of energy per unit of fuel
@@ -136,7 +146,7 @@ et = lambda m, vj, v, mf, h: pj(m, vj, v) / q(mf, h)
 
 """
     Propulsive efficiency
-        vj - air speed behind engine [m/s]
+        vj - exhaust jet speed. [m/s]
         v  - aircraft speed [m/s]
 """
 ej = lambda vj, v: 2 / (1 + vj / v)
@@ -144,7 +154,7 @@ ej = lambda vj, v: 2 / (1 + vj / v)
 """
     Total efficiency
         m  - mass of air flow through the engine  [Kg]
-        vj - air speed behind engine [m/s]
+        vj - exhaust jet speed. [m/s]
         v  - aircraft speed [m/s]
         mf - mass flow [Kg]
         h  - amount of energy per unit of fuel
