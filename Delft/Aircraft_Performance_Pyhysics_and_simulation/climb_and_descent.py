@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 v = 100
 rc_actual = 15 # climb rate [m/s]
 # rc = lambda v, gamma: v & math.sin(gamma)
-gamma_actual = math.asin(rc_actual /v)
+gamma_actual = math.asin(rc_actual / v)
 print(f"climb angle: {gamma_actual * 180 / math.pi} [degree]")
 # dc = lambda v, gamma: v * math.cos(gamma)
 dc_actual = 1000
@@ -125,19 +125,19 @@ h = 9000
 a_actual = a(h)
 m = 0.7
 print(f"speed sound at {h} meters: {a_actual} [m/s]")
-v_tas = v_air(m, h)
-print(f"true air speed v at {h} meters: {v_tas} [m/s]")
+v_tas_actual = v_air(m, h)
+print(f"true air speed v at {h} meters: {v_tas_actual} [m/s]")
 d_actual = d(h)
 print(f"air density d at {h} meters: {d_actual} [Kg/m3]")
 # v_tas  = lambda v_eas, d: math.sqrt(D0 / d) * v_eas
-v_eas = v_tas / math.sqrt(D0 / d_actual)
+v_eas = v_tas_actual / math.sqrt(D0 / d_actual)
 print(f"estimated air speed v at {h} meters: {v_eas} [m/s]")
 h1 = 9100
 v_tas1 = v_air(m, h1)
 print(f"true air speed v at {h1} meters: {v_tas1} [m/s]")
 delta_v_tas_actual = delta_v_tas(v_eas, h, h1)
 print(f"change of true air speed from {h} to {h1} meters: {delta_v_tas_actual} [m^-1]")
-rc_r_actual = rc_r(v_tas, v_eas, h, h1)
+rc_r_actual = rc_r(v_tas_actual, v_eas, h, h1)
 print(f"climb rate ration from {h} to {h1} meters: {rc_r_actual}")
 
 # Cessna Citation II
@@ -164,20 +164,169 @@ gamma_actual = -math.atan(h / horizontal_distance) * 180 / math.pi
 print(f"Glider minimum glide angle: {gamma_actual} [degree]")
 
 # Path performance
-h = [0, 300, 600, 900, 1200, 1500, 1800]
+h_a = [0, 300, 600, 900, 1200, 1500, 1800]
 v_ias = 50
-v_tas = 50
-rc = [4.6, 4.4, 4.2, 4, 3.8, 3.6, 3.4]
+rc_a = [4.6, 4.4, 4.2, 4, 3.8, 3.6, 3.4]
 v_tas_actual = [50.00, 50.73, 51.47, 52.23, 53.00, 53.80, 54.61]
 ct_total = 0
 ground_distance_total = 0
-for i, h_current in enumerate(h):
+for i, h_current in enumerate(h_a):
     if i == 0:
         continue
-    ct_current = ct(h[i-1], h_current, rc[i-1])
-    print(f"total time to climb from {h[i-1]} to {h_current}: {ct_current} [s]")
+    ct_current = ct(h_a[i-1], h_current, rc_a[i-1])
+    print(f"total time to climb from {h_a[i-1]} to {h_current}: {ct_current} [s]")
     distance_current = v_tas_actual[i-1] * ct_current
     ct_total += ct_current
     ground_distance_total += distance_current
-print(f"total time to climb from {h[0]} to {h[len(h) - 1]}: {ct_total} [s]")
-print(f"total ground distance to climb {h[len(h) - 1]}: {ground_distance_total / 1000} [km]")
+print(f"total time to climb from {h_a[0]} to {h_a[len(h_a) - 1]}: {ct_total} [s]")
+print(f"total ground distance to climb {h_a[len(h_a) - 1]}: {ground_distance_total / 1000} [km]")
+
+# Energy height
+m = 0.5
+h = 5000
+w = 400000
+G = 9.81
+mass = w / G_actual
+v_air_actual = v_air(m, h)
+print(f"\ntrue air speed v at {h} meters: {v_air_actual} [m/s]")
+eh_actual = eh(h, v_air_actual)
+print(f"energy height at {h} meters: {eh_actual} [J/N]")
+e_total = mass * G * h + mass * pow(v_air_actual, 2) / 2
+print(f"potential energy at {h} meters: {e_total} [J]")
+# ek = mass * pow(v, 2) / 2 = ep
+v_air_actual = math.sqrt(2  * e_total / mass)
+print(f"speed if e_total = ek: {v_air_actual} [m/s]")
+
+m = 1.0
+h = 15000
+v_air_actual = v_air(m, h)
+print(f"\nmaximum speed at {h} meters: {v_air_actual} [m/s]")
+
+v_actual = math.sqrt( h * 2 * G)
+print(f"\nmaximum speed: {v_actual} [m/s]")
+
+rc_actual = 50
+# rc = lambda v, gamma: v * math.sin(gamma * math.pi / 180)
+gamma = 5 # this is a guess that this climb angle is used;
+          # somehow it gives a close value 573 to the expected one 575
+v_air_actual =rc_actual / math.sin(gamma * math.pi / 180)
+print(f"\nmaximum speed at {h} meters: {v_air_actual} [m/s]")
+
+# Assignment
+
+# Cessna 208 Caravan
+
+# Q1
+cd0 = 0.02
+s = 26
+b = 15.86
+e = 0.8
+MTOM = 3995 * G_actual
+v = 95
+pa_max = 647000
+# rc = 8.46
+b += 0.1
+cd0 += cd0 / 100
+e += 10 * e / 100
+MTOM += 50 * G_actual
+cl_actual = cl(MTOM, 0, v, s)
+print(f"\nCessna 208 Caravan lift coefficient cl: {cl_actual}")
+cd_actual = cd(cd0, cl_actual, b, s, e)
+print(f"Cessna 208 Caravan drag coefficient cd: {cd_actual}")
+dr_actual = dr_by_density(cd_actual, d_actual, v, s)
+print(f"Cessna 208 Caravan drag D: {dr_actual} [N]")
+t_actual = pa_max / v
+print(f"Cessna 208 Caravan thrust T: {t_actual} [N]")
+rc_actual = rc_by_forces(t_actual, dr_actual, MTOM, v)
+print(f"Cessna 208 Caravan climb rate: {rc_actual} [m/s]")
+
+# Q2
+cd0 = 0.02
+k = 0.0352
+cl_opt = math.sqrt( cd0 / k)
+print(f"\noptimum lift coefficient cl: {cl_opt}")
+cd_actual = cd_with_k(cd0, cl_opt, k)
+print(f"drag coefficient cd: {cd_actual}")
+gamma_glide_min_actual = gamma_glide_min(cl_opt, cd_actual)
+print(f"gamma glide min: {gamma_glide_min_actual}")
+xa = 1000
+xb = 715
+ha = 120
+hb = 50
+# tan(gamma) = (ha - hb_glide) / xa
+hb_glide = ha  - math.tan(gamma_glide_min_actual) * xa
+print(f"height after gliding distance {xa}: {hb_glide} [m]")
+
+# Q3
+v_wind = 20
+v = 100 - v_wind
+rc_actual = 15
+# rc = lambda v, gamma: v * math.sin(gamma * math.pi / 180)
+gamma_actual = math.asin(rc_actual / v) * 180 / math.pi
+print(f"\nclimb angle: {gamma_actual} [degree]")
+dc_actual = 1000
+print(f"climb distance in 1 second: {dc(v, gamma_actual)} [m]")
+climb = dc_actual / dc(v, gamma_actual) * rc_actual
+print(f"climb after {dc_actual} meters: {climb} [m]")
+
+# Q4
+# Boeing 737-400
+h = 3000
+G_actual = 9.81
+w = 68050 * G_actual
+v = 220
+t = 2 * 49000
+s = 91.2
+b = 28.9
+e = 0.8
+cd0 = 0.018
+cl_actual = cl(w, h, v, s)
+print(f"\nBoeing 737-400 lift coefficient cl: {cl_actual}")
+cd_actual = cd(cd0, cl_actual, b, s, e)
+print(f"Boeing 737-400 drag coefficient cd: {cd_actual}")
+dr_actual = dr(cd_actual, h, v, s)
+print(f"Boeing 737-400 drag D: {dr_actual} [N]")
+rc_actual = rc_by_forces(t, dr_actual, w, v)
+print(f"Boeing 737-400 climb rate rc: {rc_actual} [m/s]")
+
+# need to find alpha and gamma from full eq of motions:
+# t * math.cos(alpha) - dr_actual - w * math.sin(gamma) = 0
+# l_actual - w * math.cos(gamma) + t * math.sin(alpha) = 0
+
+# todo: this is not quite correct, we must not approximate alpha
+# todo: see chatgpt sol for full eq of motion
+l_actual = l(cl_actual, h, v, s)
+print(f"Boeing 737-400 lift L: {l_actual} [N]")
+gamma_actual = math.atan((t - dr_actual) / l_actual) * 180 / math.pi
+print(f"\nBoeing 737-400 climb angle: {gamma_actual} [degree]")
+rc_actual_1 = rc(v, gamma_actual)
+print(f"Boeing 737-400 rate of climb rc: {rc_actual_1} [m/s]")
+
+# gamma = 4.513
+# gamma = 4.473
+rc_actual = 17.235 # by guessing
+# rc_actual = rc(v, 4.473)
+gamma_actual = math.asin(rc_actual / v) * 180 / math.pi
+print(f"\nBoeing 737-400 climb angle: {gamma_actual} [degree]")
+print(f"Boeing 737-400 percentage: {(rc_actual - 17.257) / rc_actual * 100} [%]")
+
+# from chatgpt
+
+# need to find alpha and gamma from full eq of motions:
+# t * math.cos(alpha) - dr_actual - w * math.sin(gamma) = 0
+# l_actual - w * math.cos(gamma) + t * math.sin(alpha) = 0
+
+K = (w**2 - t**2 - dr_actual**2 - l_actual**2) / (2*t)
+R = math.sqrt(l_actual**2 + dr_actual**2)
+
+alpha = math.atan2(dr_actual, l_actual) + math.asin(K / R)
+
+gamma_actual = math.atan2(
+    t * math.cos(alpha) - dr_actual,
+    t * math.sin(alpha) + l_actual
+) * 180 / math.pi
+
+print(f"\nBoeing 737-400 angle of attack: {alpha } [degree]")
+print(f"Boeing 737-400 climb angle: {gamma_actual} [degree]")
+rc_actual = rc(v, gamma_actual)
+print(f"Boeing 737-400 rate of climb rc: {rc_actual} [m/s]")

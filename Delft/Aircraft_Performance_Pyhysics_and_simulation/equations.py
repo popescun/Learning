@@ -244,11 +244,13 @@ gamma_by_density = lambda t, cd, d, v, s, w: math.asin((t - dr_by_density(cd, d,
 rc_by_power = lambda pa, pr, w: (pa - pr) / w
 
 """
-    Climb rate by forces [m/s]
+    Climb rate by forces [m/s] 
         t  - thrust [N]
         dr - drag [N] 
         w  - aircraft weight [Kg]
-        v  - aircraft true speed [m/s] 
+        v  - aircraft true speed [m/s]
+        
+    Note: this is using small angle approximation
 """
 rc_by_forces = lambda t, dr, w, v: (t - dr) / w * v
 
@@ -289,3 +291,10 @@ gamma_glide_min = lambda cl, cd: math.asin(cd / cl) * 180 / math.pi
         rc - climb rate [m/s] 
 """
 ct = lambda h1, h2, rc: (h2 - h1) / rc
+
+"""
+    Energy height [J/N]
+        h - altitude [m]
+        v - aircraft true speed [m/s] 
+"""
+eh = lambda h, v: h + pow(v, 2) / (2 * G)
