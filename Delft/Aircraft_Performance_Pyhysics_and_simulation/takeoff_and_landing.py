@@ -1,6 +1,8 @@
 from equations import *
 
 # Euro-ENAER Eaglet
+
+# take-off ground run
 w = 8500
 s = 9.84
 cl_max = 1.4
@@ -27,4 +29,21 @@ t_g = pa / v_tof_g_actual
 print(f"average take-off thrust: {t_g} [N]")
 a_tof_g_actual = a_tof_g(t_g, w, l_g_actual, dr_g_actual, miu)
 print(f"average take-off acceleration: {a_tof_g_actual} [m/s2]")
-print(f"ground run: {s_tof(v_lof_actual, a_tof_g_actual)} [m]")
+x_ground_actual = x_ground(v_lof_actual, a_tof_g_actual)
+print(f"ground run distance: {x_ground_actual} [m]")
+
+
+# airborne take-off
+
+gamma = 5
+# n = l_trans / w
+h_scr = 15.2
+n = 1.15 * G
+x_trans_actual = x_trans(v_lof_actual, gamma)
+print(f"\ntransition ground distance: {x_trans_actual} [m]")
+x_climb_actual = x_climb(h_scr, v_lof_actual, gamma)
+print(f"climb ground distance: {x_climb_actual} [m]")
+x_total_airborne_actual =  x_total_airborne(x_trans_actual, x_climb_actual)
+print(f"total airborne distance: {x_total_airborne_actual} [m]")
+x_total_tof_actual = x_total_tof(x_ground_actual, x_total_airborne_actual)
+print(f"total take-off distance: {x_total_tof_actual} [m]")

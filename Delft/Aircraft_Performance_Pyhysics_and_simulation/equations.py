@@ -330,4 +330,33 @@ a_tof_g = lambda t_g, w, l_g, d_g, miu: G / w * (t_g - d_g - miu * (w - l_g))
         v_lof   - lift-off speed [m/s]
         a_tof_g - average take-off acceleration [m/s2]
 """
-s_tof = lambda v_lof, a_tof_g: pow(v_lof, 2) / (2 * a_tof_g)
+x_ground = lambda v_lof, a_tof_g: pow(v_lof, 2) / (2 * a_tof_g)
+
+"""
+    Transition ground distance [m]
+        v_lof   - lift-off speed [m/s]
+        gamma   - climb angle [degree]
+"""
+x_trans = lambda v_lof, gamma: pow(v_lof, 2) / (0.15 * G) * math.sin(gamma * math.pi / 180)
+
+"""
+    Climb ground distance [m]
+        h_scr   - screen height [m] 
+        v_lof   - lift-off speed [m/s]
+        gamma   - climb angle [degree]
+"""
+x_climb = lambda h_scr, v_lof, gamma: (h_scr - (1 - math.cos(gamma * math.pi / 180)) * pow(v_lof, 2) / (0.15 * G)) / (math.tan(gamma * math.pi / 180))
+
+"""
+    Total airborne distance [m]
+        x_trans - transition ground distance [m]
+        x_climb - climb ground distance [m]
+"""
+x_total_airborne = lambda x_trans, x_climb: x_trans + x_climb
+
+"""
+    Total take-off distance [m]
+        x_ground         - ground run distance [m]
+        x_total_airborne - total airborne distance [m]
+"""
+x_total_tof = lambda x_ground, x_total_airborne: x_ground + x_total_airborne
