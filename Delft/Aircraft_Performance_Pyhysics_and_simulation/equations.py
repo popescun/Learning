@@ -298,3 +298,36 @@ ct = lambda h1, h2, rc: (h2 - h1) / rc
         v - aircraft true speed [m/s] 
 """
 eh = lambda h, v: h + pow(v, 2) / (2 * G)
+
+# take-off and landing
+"""
+    Lift-off speed [m/s]
+        w      - aircraft weight [Kg]
+        s      - wing surface [m2]
+        d      - air density [Kg/m3]
+        cl_max - max lift coefficient 
+"""
+v_lof = lambda w, s, d, cl_max: 1.05 * v_min(w, s, d, cl_max)
+
+"""
+    Average take-off air speed [m/s] 
+        v_lof - lift-off speed [m/s]
+"""
+v_tof_g =  lambda v_lof: v_lof / math.sqrt(2)
+
+"""
+    Average take-off acceleration [m/s2] 
+        t_g  - average take-off thrust [N]
+        w    - aircraft weight [N]
+        l_g  - average take-off lift [N]
+        d_g  - average take-off drag [N]
+        miu  - tire friction coefficient
+"""
+a_tof_g = lambda t_g, w, l_g, d_g, miu: G / w * (t_g - d_g - miu * (w - l_g))
+
+"""
+    Take-off ground run distance [m]
+        v_lof   - lift-off speed [m/s]
+        a_tof_g - average take-off acceleration [m/s2]
+"""
+s_tof = lambda v_lof, a_tof_g: pow(v_lof, 2) / (2 * a_tof_g)

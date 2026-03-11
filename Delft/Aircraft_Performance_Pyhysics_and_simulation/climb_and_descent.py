@@ -1,5 +1,4 @@
 from equations import *
-from matplotlib import pyplot as plt
 
 v = 100
 rc_actual = 15 # climb rate [m/s]
