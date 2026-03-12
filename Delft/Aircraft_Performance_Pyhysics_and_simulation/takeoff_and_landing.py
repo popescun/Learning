@@ -1,8 +1,10 @@
+from climb_and_descent import pa_sea_level
 from equations import *
 
 # Euro-ENAER Eaglet
 
 # take-off ground run
+h = 0
 w = 8500
 s = 9.84
 cl_max = 1.4
@@ -47,3 +49,73 @@ x_total_airborne_actual =  x_total_airborne(x_trans_actual, x_climb_actual)
 print(f"total airborne distance: {x_total_airborne_actual} [m]")
 x_total_tof_actual = x_total_tof(x_ground_actual, x_total_airborne_actual)
 print(f"total take-off distance: {x_total_tof_actual} [m]")
+
+# take-of at 200 meters altitude
+h = 2000
+d_actual = 1.0065
+# pa / pa_sea_level =  d / d_sea_level
+pa_2000 = pa * d_actual / D0
+print(f"\npower at sea level: {pa_2000} [m/s]")
+v_min_tof = v_min(w, s, d_actual, cl_max) # v_min depends on the max lift coefficient
+v_lof_actual = v_lof(w, s, d_actual, cl_max)
+# niu = p_a / p_br
+print(f"min take-off speed: {v_min_tof} [m/s]")
+print(f"lift-off speed: {v_lof_actual} [m/s]")
+v_tof_g_actual = v_tof_g(v_lof_actual)
+print(f"average take off speed: {v_tof_g_actual} [m/s]")
+dr_g_actual = dr(cd_g, h, v_tof_g_actual, s)
+print(f"average take off drag: {dr_g_actual} [N]")
+l_g_actual = l(cl_g, h, v_tof_g_actual, s)
+print(f"average take off lift: {l_g_actual} [N]")
+t_g = pa_2000 / v_tof_g_actual
+print(f"average take-off thrust: {t_g} [N]")
+a_tof_g_actual = a_tof_g(t_g, w, l_g_actual, dr_g_actual, miu)
+print(f"average take-off acceleration: {a_tof_g_actual} [m/s2]")
+x_ground_actual = x_ground(v_lof_actual, a_tof_g_actual)
+
+x_trans_actual = x_trans(v_lof_actual, gamma)
+print(f"\ntransition ground distance: {x_trans_actual} [m]")
+x_climb_actual = x_climb(h_scr, v_lof_actual, gamma)
+print(f"climb ground distance: {x_climb_actual} [m]")
+x_total_airborne_actual =  x_total_airborne(x_trans_actual, x_climb_actual)
+print(f"total airborne distance: {x_total_airborne_actual} [m]")
+x_total_tof_actual_prev = x_total_tof_actual
+x_total_tof_actual = x_total_tof(x_ground_actual, x_total_airborne_actual)
+print(f"total take-off distance: {x_total_tof_actual} [m]")
+distance_change = (x_total_tof_actual - x_total_tof_actual_prev) / x_total_tof_actual_prev * 100
+print(f"\ndistance change: {distance_change} [%]")
+
+# take-off at sea level with higher weight
+h = 0
+w = 9000
+d_actual = 1.225 # sea level
+pa = p_br * niu_tof
+print(f"\npower at sea level: {pa} [m/s]")
+v_min_tof = v_min(w, s, d_actual, cl_max) # v_min depends on the max lift coefficient
+v_lof_actual = v_lof(w, s, d_actual, cl_max)
+# niu = p_a / p_br
+print(f"min take-off speed: {v_min_tof} [m/s]")
+print(f"lift-off speed: {v_lof_actual} [m/s]")
+v_tof_g_actual = v_tof_g(v_lof_actual)
+print(f"average take off speed: {v_tof_g_actual} [m/s]")
+dr_g_actual = dr(cd_g, h, v_tof_g_actual, s)
+print(f"average take off drag: {dr_g_actual} [N]")
+l_g_actual = l(cl_g, h, v_tof_g_actual, s)
+print(f"average take off lift: {l_g_actual} [N]")
+t_g = pa / v_tof_g_actual
+print(f"average take-off thrust: {t_g} [N]")
+a_tof_g_actual = a_tof_g(t_g, w, l_g_actual, dr_g_actual, miu)
+print(f"average take-off acceleration: {a_tof_g_actual} [m/s2]")
+x_ground_actual = x_ground(v_lof_actual, a_tof_g_actual)
+
+x_trans_actual = x_trans(v_lof_actual, gamma)
+print(f"\ntransition ground distance: {x_trans_actual} [m]")
+x_climb_actual = x_climb(h_scr, v_lof_actual, gamma)
+print(f"climb ground distance: {x_climb_actual} [m]")
+x_total_airborne_actual =  x_total_airborne(x_trans_actual, x_climb_actual)
+print(f"total airborne distance: {x_total_airborne_actual} [m]")
+x_total_tof_actual_prev = x_total_tof_actual_prev # previous at sea level
+x_total_tof_actual = x_total_tof(x_ground_actual, x_total_airborne_actual)
+print(f"total take-off distance: {x_total_tof_actual} [m]")
+distance_change = (x_total_tof_actual - x_total_tof_actual_prev) / x_total_tof_actual_prev * 100
+print(f"\ndistance change: {distance_change} [%]")
