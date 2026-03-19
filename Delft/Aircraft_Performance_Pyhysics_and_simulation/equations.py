@@ -300,6 +300,7 @@ ct = lambda h1, h2, rc: (h2 - h1) / rc
 eh = lambda h, v: h + pow(v, 2) / (2 * G)
 
 # take-off and landing
+
 """
     Lift-off speed [m/s]
         w      - aircraft weight [Kg]
@@ -360,3 +361,127 @@ x_total_airborne = lambda x_trans, x_climb: x_trans + x_climb
         x_total_airborne - total airborne distance [m]
 """
 x_total_tof = lambda x_ground, x_total_airborne: x_ground + x_total_airborne
+
+"""
+    Take-off field length [m]
+        bfl - balanced field length [m]
+"""
+field_length_tof = lambda bfl: 1.15 * bfl
+
+"""
+    Landing air speed [m/s]
+        l_landing - landing lift force [N] 
+        s         - wing surface [m2]
+        d         - air density [Kg/m3]
+        cl_max    - max lift coefficient 
+"""
+v_landing = lambda l_landing, s, d, cl_max: 1.3 * v_min(l_landing, s, d, cl_max)
+
+"""
+    Landing radius [m]
+        w       - aircraft weight [Kg]
+        s       - wing surface [m2]
+        d       - air density [Kg/m3]
+        cl_max  - max lift coefficient 
+        delta_n - load factor 
+"""
+r_landing = lambda w, s, d, cl_max, delta_n: (pow(1.3, 2) * w / s * 2 / d * 1 / cl_max) / (delta_n * G)
+
+"""
+    Landing flare height [m]
+        r - lading radius [m]
+"""
+h_flare = lambda r: (1  - math.cos(3 * math.pi / 180)) * r
+
+"""
+    Landing approach distance [m]
+        h_scr   - screen height [m]
+        h_flare - flare height [m]
+"""
+x_ap = lambda h_scr, h_flare: (h_scr - h_flare) / math.tan(3 * math.pi / 180)
+
+"""
+    Landing flare distance [m]
+        r - lading radius [m]
+"""
+x_flare = lambda r:  r * math.sin(3 * math.pi / 180)
+
+"""
+    Landing airborne distance [m]
+        x_ap - landing approach distance [m]
+        x_flare - landing flare distance [m]
+"""
+x_landing_airborne_distance = lambda x_ap, x_flare: x_ap + x_flare
+
+"""
+    Landing airborne distance [m]
+        r - landing radius [m]
+        h_scr - screen height [m]
+        gamma - landing angle [degree]
+"""
+x_landing_airborne_distance_by_radius = lambda r, h_scr, gamma: r * math.sin(gamma * math.pi / 180) + (h_scr - (1 - math.cos(gamma * math.pi / 180)) * r) / math.tan(gamma * math.pi / 180)
+
+
+"""
+    Landing approach speed [m/s]
+        v_min - landing minimum speed [m/s]
+"""
+v_ap = lambda v_min: 1.3 * v_min
+
+"""
+    Landing transition ground-run distance [m]
+        v_t - touchdown air speed [m/s]
+        t_trans - landing transition time [s]
+"""
+x_trans_ground_run = lambda v_t, t_trans: t_trans * v_t
+
+"""
+    Touchdown airspeed [m/s]
+        v_min - min airspeed before touchdown [m/s]
+        k     - correction coefficient [m/s]
+"""
+v_t = lambda v_min, k: k * v_min
+
+"""
+    Ground run airspeed [m/s]
+        v_t - touchdown airspeed [m/s]
+"""
+v_ground_run = lambda v_t: v_t / math.sqrt(2)
+
+"""
+    Friction drag of the wheels [N]
+        w     - aircraft weight [N]
+        l     - ground run lift force [N]
+        miu_r - friction coefficient 
+"""
+dr_friction = lambda w, l, miu_r: miu_r * (w -l)
+
+"""
+    Ground run deceleration [m/s2]
+    w     - aircraft weight [N]
+    t     - thrust [N]
+    dr    - drag [N]
+    l     - lift [N]
+    miu_r - friction coefficient    
+"""
+a_ground_run = lambda w, t, dr, l, miu_r: G / w * (t - dr - miu_r * (w - l))
+
+"""
+    Landing ground-run brake distance[m]
+    w      - aircraft weight [N]
+    t      - thrust [N]
+    dr     - drag [N]
+    l      - lift [N]
+    miu_r  - friction coefficient    
+    s      - wing surface [m2]
+    cl_max - max lift coefficient  
+    k      - correction coefficient [m/s]
+"""
+x_brake_ground_run = lambda w, t, dr, l, miu_r, s, cl_max, k: -(w * pow(k, 2)) / (s * d(0) * cl_max) * 1 / a_ground_run(w, t, dr, l, miu_r)
+
+"""
+    Total ground run distance [m]
+    x_trans_ground_run - ground run transition distance [m]
+    x_brake_ground_run - ground run brake distance [m]
+"""
+x_ground_run_total = lambda x_trans_ground_run, x_brake_ground_run: x_trans_ground_run + x_brake_ground_run
