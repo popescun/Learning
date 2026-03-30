@@ -1,6 +1,3 @@
-import math
-
-from climb_and_descent import v_actual
 from equations import *
 
 # Euro-ENAER Eaglet
@@ -263,8 +260,9 @@ t0 = 2 * 12000
 cl = 0.25 # correspond to alpha in polar
 cd = 0.026 # correspond to cl in polar
 
-v_actual = v_forward -  head_wind_speed * math.cos(math.degrees(alpha))
-print(f"\nfor speed: {v_actual} [m/s]")
+# according to the course assistant, air speed is the sum of both speeds
+v_actual = v_forward + head_wind_speed # * math.cos(math.radians(alpha))
+print(f"\nair speed: {v_actual} [m/s]")
 m_actual = v_actual / a(0)
 print(f"mach number: {m_actual} [m/s]")
 t_g = t0 * (1 - 1.2 * m_actual + 0.8 * pow(m_actual, 2))

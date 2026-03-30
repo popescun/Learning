@@ -485,3 +485,101 @@ x_brake_ground_run = lambda w, t, dr, l, miu_r, s, cl_max, k: -(w * pow(k, 2)) /
     x_brake_ground_run - ground run brake distance [m]
 """
 x_ground_run_total = lambda x_trans_ground_run, x_brake_ground_run: x_trans_ground_run + x_brake_ground_run
+
+# cruise flight
+
+"""
+    Optimum(max range) lift coefficient for jet aircraft
+        cd0 - zero-lift drag coefficient
+        k - coefficient of lift coefficient from drag coefficient formula 
+"""
+cl_max_range_jet = lambda cd0, k: math.sqrt(1 / 3 * cd0 / k)
+
+"""
+    Maximum endurance lift coefficient for jet aircraft
+        cd0 - zero-lift drag coefficient
+        k   - coefficient of lift coefficient from drag coefficient formula 
+"""
+cl_max_endurance_jet = lambda cd0, k: math.sqrt(cd0 / k)
+
+"""
+    Optimum(max range) lift coefficient for propeller aircraft
+        cd0 - zero-lift drag coefficient
+        k - coefficient of lift coefficient from drag coefficient formula 
+"""
+cl_max_range_propeller = lambda cd0, k: math.sqrt(cd0 / k)
+
+"""
+    Maximum endurance lift coefficient for propeller aircraft
+        cd0 - zero-lift drag coefficient
+        k   - coefficient of lift coefficient from drag coefficient formula 
+"""
+cl_max_endurance_propeller = lambda cd0, k: math.sqrt(3 * cd0 / k)
+
+"""
+    Cruise thrust [N]
+        w      - aircraft weight [N]
+        cd_opt - optimal drag coefficient
+        cl_opt - optimal lift coefficient 
+"""
+t_cruise = lambda w, cd_opt, cl_opt: w * cd_opt / cl_opt
+
+"""
+    Fuel flow for jets [Kg/h]
+        ct - Thrust specific fuel consumption (constant) [N/Nh]
+         t - cruise thrust [N]
+"""
+m_f_jet = lambda ct, t: ct * t / G
+
+"""
+    Fuel flow for propellers [Kg/h]
+        cp   - constant independent of v [Kg/Ws]
+        eta  - efficiency   
+        par  - required power [W]
+"""
+m_f_propeller = lambda cp, eta, par: cp / eta *  par
+
+
+"""
+    Cruise range for jets [m/Kg]
+        v - cruise speed [m/s]
+        m_f -  fuel consumption [m/s]
+"""
+range_cruise = lambda v, m_f: v / m_f
+
+"""
+     Climb range for propellers [m]
+       v       - cruise speed [m/s]
+       ct      - thrust specific fuel consumption (constant) 
+       cl      - lift coefficient 
+       cd      - drag coefficient 
+       w_start - aircraft initial weight [N]
+       w_end   - aircraft final weight [N] 
+"""
+range_climb_jets = lambda v, ct, cl, cd, w_start, w_end :v/ (ct / 3600) * cl / cd * math.log(w_start / w_end)
+
+"""
+    Climb range for propellers [m]
+       eta - efficiency
+       cp - constant independent of v [Kg/Ws]
+       cl  - lift coefficient 
+       cd - drag coefficient 
+       w_start - aircraft initial weight [N]
+       w_end - aircraft final weight [N] 
+"""
+range_climb_propellers = lambda eta, cp, cl, cd, w_start, w_final: eta / cp * cl / cd * math.log(w_start / w_final)
+
+"""
+    Cruise drag [N]
+        w  - aircraft weight [N]
+        cd - drag coefficient
+        cl - lift coefficient
+"""
+dr_cruise = lambda w, cd, cl: (cd / cl) * w
+
+"""
+  Thrust at altitude  [N]
+    t0  - static sea level thrust [N]
+    d   - air density at altitude [Kg/m3]
+"""
+t_altitude = lambda t0, d: t0 * d / d(0)
