@@ -3,6 +3,7 @@
  */
 
 #include "mcu.h"
+#include "FreeRTOSConfig.h"
 
 int main(void)
 {
