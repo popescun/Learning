@@ -1,0 +1,69 @@
+cmake_minimum_required(VERSION 4.2)
+
+#set(CMAKE_C_STANDARD 11)
+
+###################### CONSTANTS ######################################
+set (PROJECT_TYPE_EXECUTABLE          "exe")
+set (PROJECT_TYPE_STATIC_LIBRARY      "static-lib")
+set (MCPU_CORTEX_M0				      "-mcpu=cortex-m0")
+set (MCPU_CORTEX_M0PLUS				  "-mcpu=cortex-m0plus")
+set (MCPU_CORTEX_M3				      "-mcpu=cortex-m3")
+set (MCPU_CORTEX_M4				      "-mcpu=cortex-m4")
+set (MCPU_CORTEX_M7				      "-mcpu=cortex-m7")
+set (MCPU_CORTEX_M33				  "-mcpu=cortex-m33")
+set (MCPU_CORTEX_M55				  "-mcpu=cortex-m55")
+set (MCPU_CORTEX_M85				  "-mcpu=cortex-m85")
+set (MFPU_FPV4_SP_D16                 "-mfpu=fpv4-sp-d16")
+set (MFPU_FPV4                        "-mfpu=vfpv4")
+set (MFPU_FPV5_D16                    "-mfpu=fpv5-d16")
+set (RUNTIME_LIBRARY_REDUCED_C        "--specs=nano.specs")
+set (RUNTIME_LIBRARY_STD_C            "")
+set (RUNTIME_LIBRARY_SYSCALLS_MINIMAL "--specs=nosys.specs")
+set (RUNTIME_LIBRARY_SYSCALLS_NONE    "")
+set (MFLOAT_ABI_SOFTWARE              "-mfloat-abi=soft")
+set (MFLOAT_ABI_HARDWARE              "-mfloat-abi=hard")
+set (MFLOAT_ABI_MIX                   "-mfloat-abi=softfp")
+#######################################################################
+###################### VARIABLES ######################################
+set (PROJECT_NAME             "rtos_project")
+set (PROJECT_TYPE             "exe")
+set (LINKER_SCRIPT            "../STM32F446RETX_FLASH.ld")
+set (MCPU                     "-mcpu=Cortex-M4")
+set (MFPU                 "-mfpu=fpv4-sp-d16")
+set (MFLOAT_ABI               "")
+set (RUNTIME_LIBRARY          "--specs=nano.specs")
+set (RUNTIME_LIBRARY_SYSCALLS "--specs=nosys.specs")
+
+project(${PROJECT_NAME})
+enable_language(ASM)
+
+add_compile_definitions(STM32F446xx)
+
+set(STM32_FW_DIR /Users/popescun/Nicu/Learning/udemy/Advanced_Embedded_Software_with_STM32_FreeRTOS_and_Modbus/Software/STM32Cube_FW_F4_V1.28.0)
+
+include_directories(
+  config
+  ${STM32_FW_DIR}/Drivers/CMSIS/Include
+  ${STM32_FW_DIR}/Drivers/CMSIS/Device/ST/STM32F4xx/Include
+)
+
+set (PROJECT_SOURCES
+  # LIST SOURCE FILES HERE
+  startup/startup_stm32f446retx.s
+  main.c
+  syscalls.c
+  sysmem.c
+)
+
+if (${PROJECT_TYPE} MATCHES ${PROJECT_TYPE_EXECUTABLE})
+  add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
+  add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${CMAKE_PROJECT_NAME}>)
+elseif (${PROJECT_TYPE} MATCHES ${PROJECT_TYPE_STATIC_LIBRARY})
+  add_library(${PROJECT_NAME} ${PROJECT_SOURCES})
+endif()
+
+set (CMAKE_EXECUTABLE_SUFFIX ".elf")
+set (CMAKE_STATIC_LIBRARY_SUFFIX ".a")
+set (CMAKE_C_FLAGS "${MCPU} -std=gnu11 ${MFPU} ${MFLOAT_ABI} ${RUNTIME_LIBRARY} -mthumb -Wall -Werror")
+set (CMAKE_EXE_LINKER_FLAGS "-T${LINKER_SCRIPT} ${RUNTIME_LIBRARY_SYSCALLS} -Wl,-Map=test.map -Wl,--gc-sections -static -Wl,--start-group -lc -lm -Wl,--end-group")
+set (CMAKE_ASM_FLAGS "${CMAKE_C_FLAGS} -x assembler-with-cpp")
