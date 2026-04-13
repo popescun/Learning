@@ -4,8 +4,11 @@
 books
 octave
 .venv
+.metadata
 
 build
+
+*_back
 
 *.x
 *.o
