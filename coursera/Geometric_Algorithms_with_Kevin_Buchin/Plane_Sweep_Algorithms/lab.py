@@ -53,15 +53,15 @@ class Segment:
         xB = other.x2
         yB = other.y2
 
-        dx1 = x2 - x1;
+        dx1 = x2 - x1
         dy1 = y2 - y1
-        dx = xB - x;
-        dy = yB - y;
+        dx = xB - x
+        dy = yB - y
         DET = (-dx1 * dy + dy1 * dx)
 
         # if math.fabs(DET) < DET_TOLERANCE: raise Exception('...')
         if DET == 0: raise Exception('Intersection implementation not sufficiently robust for this input.')
-        DETinv = Fraction(1, DET)
+        # DETinv = Fraction(1, DET)
 
         r = Fraction((-dy * (x - x1) + dx * (y - y1)), DET)
         s = Fraction((-dy1 * (x - x1) + dx1 * (y - y1)), DET)
@@ -71,7 +71,7 @@ class Segment:
         # return the average of the two descriptions
         xi = x1 + r * dx1
         yi = y1 + r * dy1
-        return (xi, yi)
+        return xi, yi
 
 
 class Event:
