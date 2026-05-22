@@ -80,7 +80,8 @@ inline void thread_func() {
               << std::endl;
   }
 
-  std::this_thread::yield();
+  std::this_thread::yield(); // Provides a hint to the implementation to reschedule
+                             // the execution of threads, allowing other threads to run.
   std::this_thread::sleep_for(1s);
 
   // using std::unique_lock

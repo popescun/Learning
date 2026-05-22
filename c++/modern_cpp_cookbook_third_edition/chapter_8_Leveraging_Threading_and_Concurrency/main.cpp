@@ -4,10 +4,13 @@
 #include "shared_data_access_sync.hpp"
 
 
+#include <functional>
+#include <vector>
+
 int main() {
   // threading_basic::test();
   // using_joinable_threads::test();
-  // understanding_value_categories::test();
-  shared_data_access_sync::test();
+  understanding_value_categories::test();
+  // shared_data_access_sync::test();
   return 0;
 }

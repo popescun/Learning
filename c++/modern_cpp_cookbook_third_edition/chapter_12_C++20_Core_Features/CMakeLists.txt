@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 4.2.0)
 
-set(CMAKE_C_COMPILER "/opt/homebrew/Cellar/llvm/21.1.8/bin/clang")
-set(CMAKE_CXX_COMPILER "/opt/homebrew/Cellar/llvm/21.1.8/bin/clang++")
+#set(CMAKE_C_COMPILER "/opt/homebrew/Cellar/llvm/21.1.8/bin/clang")
+#set(CMAKE_CXX_COMPILER "/opt/homebrew/Cellar/llvm/21.1.8/bin/clang++")
 
 # https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
 set(CMAKE_CXX_STANDARD 23)

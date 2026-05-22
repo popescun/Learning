@@ -120,9 +120,7 @@ inline void test() {
      << std::is_reference_v<decltype(std::move(a + b))> << "\n";
   ss << "Expression 'a_ref+ b_ref' is reference: "
      << std::is_reference_v<decltype(a_ref + b_ref)> << "\n";
-  // ss << "Expression 'a + b' address: " << std::addressof(a + b) << "\n";
   ss << "Expression '10' is " << (is_lvalue(10) ? "lvalue" : "rvalue") << "\n";
-  // ss << "Expression '10' address: " << std::addressof(10) << "\n"; // fail
   ss << "Expression 'str' is " << (is_lvalue(str) ? "lvalue" : "rvalue")
      << "\n";
   ss << "Expression 'std::string(\"Hello\")' is "
@@ -145,27 +143,36 @@ inline void test() {
 
   ss << "\nExpression 'T' is reference: " << std::is_reference_v<T>  << "\n";
   ss << "Expression 'T_lref' is "
-     << (std::is_lvalue_reference_v<T_lref> ? "lvalue" : "rvalue") << "\n";
+     << (std::is_lvalue_reference_v<T_lref> ? "lvalue ref" : "rvalue ref") << "\n";
   ss << "Expression 'T_lref_custom' is "
-     << (std::is_lvalue_reference_v<T_lref_custom> ? "lvalue" : "rvalue")
+     << (std::is_lvalue_reference_v<T_lref_custom> ? "lvalue ref" : "rvalue ref")
      << "\n";
   ss << "Expression 'T_rref' is "
-     << (std::is_lvalue_reference_v<T_rref> ? "lvalue" : "rvalue") << "\n";
+     << (std::is_lvalue_reference_v<T_rref> ? "lvalue ref" : "rvalue ref") << "\n";
   ss << "Expression 'T_rref_custom' is "
-     << (std::is_lvalue_reference_v<T_rref_custom> ? "lvalue" : "rvalue")
+     << (std::is_lvalue_reference_v<T_rref_custom> ? "lvalue ref" : "rvalue ref")
      << "\n";
   std::cout << ss.str();
 
    ss.str("");
    int x = 5;
+   ss << "\nx address:" << std::addressof(x) << "\n";
+   int& x_ref = x;
    // x is not affected by std::move
-   int&& rref = std::move(x);
-   ss << "rref is: " << (is_lvalue(rref) ? "lvalue" : "rvalue") << "\n";
+   int&& x_rref = std::move(x);
+   ss << "x address:" << std::addressof(x_rref) << "\n";
+   ss << "x is not affected by std::move:" << x << "\n";
+   ss << "x_ref is: " << (is_lvalue(x_ref) ? "lvalue" : "rvalue") << "\n";
+   ss << "x_rref is: " << (is_lvalue(x_rref) ? "lvalue" : "rvalue") << "\n";
    // Note: std::move does not affect rref nor its value, but it calls function with move semantic.
-   ss << "rref with std::move is: " << (is_lvalue(std::move(rref)) ? "lvalue" : "rvalue") << "\n";
+   ss << "x_rref with std::move is: " << (is_lvalue(std::move(x_rref)) ? "lvalue" : "rvalue") << "\n";
    ss << "x with std::move is: " << (is_lvalue(std::move(x)) ? "lvalue" : "rvalue") << "\n";
-   ss << "rref address: " << std::addressof(rref) << "\n";
-   ss << "rref type is rvalue reference: " << std::is_rvalue_reference_v<decltype(rref)> << "\n";
+   ss << "x_ref address: " << std::addressof(x_rref) << "\n";
+   ss << "x_rref address: " << std::addressof(x_rref) << "\n";
+   ss << "x_ref type is lvalue reference: " << std::is_lvalue_reference_v<decltype(x_ref)> << "\n";
+   ss << "x_ref type is rvalue reference: " << std::is_rvalue_reference_v<decltype(x_ref)> << "\n";
+   ss << "x_rref type is lvalue reference: " << std::is_lvalue_reference_v<decltype(x_rref)> << "\n";
+   ss << "x_rref type is rvalue reference: " << std::is_rvalue_reference_v<decltype(x_rref)> << "\n";
    std::cout << ss.str();
 
   std::expected<std::int32_t, std::string> e;
