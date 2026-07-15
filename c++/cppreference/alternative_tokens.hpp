@@ -1,12 +1,10 @@
-#include <iostream>
+#include <print>
 
 namespace alternative_tokens {
 inline void test() {
   int a[10];
-
   a[0] = 22;
-
-  std::cout << a[0] << std::endl;
-  std::cout << a<:0:> << std::endl;
-}    
+  // std::println("a[0]:{}", a[0]);
+  // std::println("a<:0:>:{}", a<:0:>);
 }
+} // namespace alternative_tokens
