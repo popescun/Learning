@@ -4,109 +4,166 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <optional>
 #include <print>
-#include <random>
 #include <span>
 #include <thread>
+#include <vector>
 
-#ifdef __cpp_lib_hardware_interference_size
+#if defined(__cpp_lib_hardware_interference_size)
 #include <new>
-#define CACHE_LINE_SIZE std::hardware_destructive_interference_size
-#elifdef __aarch64__ &&__APPLE__
-#define CACHE_LINE_SIZE 128 // Apple Silicon
-#elifdef __x86_64__ || __i386__ || __aarch64__
-#define CACHE_LINE_SIZE 64
+inline constexpr std::size_t CACHE_LINE_SIZE =
+    std::hardware_destructive_interference_size;
+#elif defined(__aarch64__) && defined(__APPLE__)
+inline constexpr std::size_t CACHE_LINE_SIZE = 128; // Apple Silicon
 #else
-#define CACHE_LINE_SIZE 64 // safe default
+inline constexpr std::size_t CACHE_LINE_SIZE = 64; // safe default
 #endif
 
 namespace fast_queue {
 
-constexpr auto QUEUE_SIZE = 10 * CACHE_LINE_SIZE;
-/**
-* Both counters are written by the producer, read by the consumers(s).
-  Before/after write operation, both counters contain the same value.
+// The ring capacity must be a power of two so a monotonically increasing byte
+// counter can be mapped onto a buffer offset with a cheap bit-mask instead of a
+// modulo.  Keeping it small makes it easy to drive the queue all the way to
+// full and wrap around many times in the tests below.
+constexpr std::size_t QUEUE_SIZE = 1024;
+static_assert((QUEUE_SIZE & (QUEUE_SIZE - 1)) == 0,
+              "QUEUE_SIZE must be a power of two");
+constexpr std::uint64_t QUEUE_MASK = QUEUE_SIZE - 1;
 
- Intervals:
-  - [write_counter, read_counter] defines the interval where data can be read
-out.
-  - [read_counter, write_counter] defines the interval where data is being
-written to.
+// Each message is framed as [int32 length][payload bytes].
+using header_t = std::int32_t;
+
+/**
+ * Single-producer / single-consumer byte ring buffer.
+ *
+ * Two monotonically increasing byte counters describe the state:
+ *  - write_counter: total bytes committed by the producer (head). Written by
+ *    the producer, read by the consumer.
+ *  - read_counter:  total bytes consumed by the consumer  (tail). Written by
+ *    the consumer, read by the producer.
+ *
+ * The number of bytes currently in flight is (write_counter - read_counter);
+ * it is always in the range [0, QUEUE_SIZE].
+ *  - empty  <=> write_counter == read_counter
+ *  - full   <=> write_counter - read_counter == QUEUE_SIZE
+ *
+ * Because fullness/emptiness are distinguished by the counter *difference* (not
+ * by offset equality), the whole buffer can be used - there is no wasted slot.
+ * The physical position of a counter in the buffer is (counter & QUEUE_MASK).
  */
 struct fast_queue {
   alignas(CACHE_LINE_SIZE) std::atomic<std::uint64_t> read_counter{0};
   alignas(CACHE_LINE_SIZE) std::atomic<std::uint64_t> write_counter{0};
-  alignas(CACHE_LINE_SIZE) std::array<std::byte, QUEUE_SIZE> buffer;
+  alignas(CACHE_LINE_SIZE) std::array<std::byte, QUEUE_SIZE> buffer{};
 };
 
+// Copy n bytes into the ring starting at logical position `pos`, wrapping
+// around the physical end of the buffer when necessary (circular write).
+inline void ring_write(fast_queue &fq, std::uint64_t pos, const std::byte *src,
+                       std::size_t n) {
+  const std::size_t offset = static_cast<std::size_t>(pos & QUEUE_MASK);
+  const std::size_t first = std::min(n, QUEUE_SIZE - offset);
+  std::memcpy(fq.buffer.data() + offset, src, first);
+  if (n > first) { // the record straddles the end -> continue at the start
+    std::memcpy(fq.buffer.data(), src + first, n - first);
+  }
+}
+
+// Copy n bytes out of the ring starting at logical position `pos`, wrapping
+// around the physical end of the buffer when necessary (circular read).
+inline void ring_read(const fast_queue &fq, std::uint64_t pos, std::byte *dst,
+                      std::size_t n) {
+  const std::size_t offset = static_cast<std::size_t>(pos & QUEUE_MASK);
+  const std::size_t first = std::min(n, QUEUE_SIZE - offset);
+  std::memcpy(dst, fq.buffer.data() + offset, first);
+  if (n > first) {
+    std::memcpy(dst + first, fq.buffer.data(), n - first);
+  }
+}
+
 struct producer {
+  /**
+   * Try to write one message. Returns false (nothing written) when the queue
+   * does not have room for the whole record - this is the limit check that
+   * gives us back-pressure and guarantees the consumer never loses data.
+   */
+  bool try_write(fast_queue &fq, std::span<const std::byte> payload) {
+    const std::size_t record_size = sizeof(header_t) + payload.size();
+    assert(record_size <= QUEUE_SIZE && "message larger than the whole queue");
 
-  void write(fast_queue &fq, const std::span<std::byte> &buffer) {
-    std::println("producer::write...");
-    // we write into the queue: buffer.size + buffer.data
-    const std::uint64_t payload_size = sizeof(std::int32_t) + buffer.size();
-    write_counter += payload_size;
+    // Check the free space against the limit. First use the cached tail to
+    // avoid touching the consumer's cache line on every call; only refresh from
+    // the shared counter if that suggests we might be full.
+    std::uint64_t in_flight = write_counter - cached_read;
+    if (in_flight + record_size > QUEUE_SIZE) {
+      cached_read = fq.read_counter.load(std::memory_order_acquire);
+      in_flight = write_counter - cached_read;
+      if (in_flight + record_size > QUEUE_SIZE) {
+        return false; // genuinely full
+      }
+    }
 
-    // todo: we must have checker for over-flowing of the buffer and resetting
-    // the counters
+    // Frame the message: length prefix followed by the payload. Both copies go
+    // through ring_write so a record that reaches the end of the buffer wraps
+    // around to the beginning.
+    const auto len = static_cast<header_t>(payload.size());
+    ring_write(fq, write_counter, reinterpret_cast<const std::byte *>(&len),
+               sizeof(len));
+    ring_write(fq, write_counter + sizeof(len), payload.data(), payload.size());
 
+    write_counter += record_size;
+    // Publish: everything up to write_counter is now safe for the consumer to
+    // read. release pairs with the consumer's acquire load.
     fq.write_counter.store(write_counter, std::memory_order_release);
-    // now the interval [read_counter, write_counter] is reserved
-    // consumer still can read the interval [write_counter, read_counter]
-
-    const auto data_size = static_cast<std::int32_t>(buffer.size());
-    // memcpy is safe by itself as it is only one producer writing at non-shared
-    // memory at the writing time it's also safe and lock-free encode the new
-    // data size
-    std::memcpy(next_element, &data_size, sizeof(data_size));
-    // write new data
-    std::memcpy(next_element + sizeof(data_size), buffer.data(), data_size);
-
-    fq.read_counter.store(write_counter, std::memory_order_release);
-    // now the whole buffer is available for the consumer as read_counter ==
-    // write_counter
-
-    next_element += payload_size;
+    return true;
   }
 
-  alignas(CACHE_LINE_SIZE) std::atomic<std::uint64_t> write_counter{0};
-  std::byte *next_element = nullptr;
+  std::uint64_t write_counter{0}; // private copy of the head
+  std::uint64_t cached_read{0};   // last observed tail (consumer progress)
 };
 
 struct consumer {
   /**
-   * Gets #bytes read, 0 if nothing to read.
+   * Try to read one message into `out`. Returns the number of payload bytes
+   * read, or std::nullopt when the queue is empty.
    */
-  bool try_read(const fast_queue &fq, const std::span<std::byte> &buffer) {
-    std::println("consumer::try_read...");
-    if (read_counter == fq.read_counter.load(std::memory_order_acquire)) {
-      return false;
+  std::optional<std::size_t> try_read(fast_queue &fq,
+                                      std::span<std::byte> out) {
+    // Empty check. Use the cached head first, refresh only when it looks empty.
+    if (read_counter == cached_write) {
+      cached_write = fq.write_counter.load(std::memory_order_acquire);
+      if (read_counter == cached_write) {
+        return std::nullopt; // nothing to read
+      }
     }
 
-    std::int32_t data_size;
-    std::memcpy(&data_size, next_element, sizeof(data_size));
+    header_t len{};
+    ring_read(fq, read_counter, reinterpret_cast<std::byte *>(&len),
+              sizeof(len));
+    assert(len >= 0 && static_cast<std::size_t>(len) <= out.size() &&
+           "output buffer isn't large enough for the message");
 
-    auto write_counter = fq.write_counter.load(std::memory_order_acquire);
-    assert(write_counter - read_counter <= fq.buffer.size() &&
-           "queue overflow");
-    assert(data_size <= buffer.size() && "buffer space isn’t large enough");
+    ring_read(fq, read_counter + sizeof(len), out.data(),
+              static_cast<std::size_t>(len));
 
-    std::memcpy(buffer.data(), next_element + sizeof(data_size), data_size);
-
-    const std::uint64_t payload_size = sizeof(data_size) + buffer.size();
-    read_counter += payload_size;
-    next_element += payload_size;
-
-    write_counter = fq.write_counter.load(std::memory_order_acquire);
-    assert(write_counter - read_counter <= fq.buffer.size() &&
-           "queue overflow");
-
-    return true;
+    const std::size_t record_size = sizeof(len) + static_cast<std::size_t>(len);
+    read_counter += record_size;
+    // Publish: the producer may now reuse the space we just consumed.
+    fq.read_counter.store(read_counter, std::memory_order_release);
+    return static_cast<std::size_t>(len);
   }
 
-  alignas(CACHE_LINE_SIZE) std::atomic<std::uint64_t> read_counter{0};
-  std::byte *next_element = nullptr;
+  std::uint64_t read_counter{0}; // private copy of the tail
+  std::uint64_t cached_write{0}; // last observed head (producer progress)
 };
 
 template <class T> std::array<std::byte, sizeof(T)> to_bytes(const T &obj) {
@@ -116,8 +173,9 @@ template <class T> std::array<std::byte, sizeof(T)> to_bytes(const T &obj) {
   return buf;
 }
 
-template <class T> T from_bytes(const std::array<std::byte, sizeof(T)> &buf) {
+template <class T> T from_bytes(const std::span<const std::byte> buf) {
   static_assert(std::is_trivially_copyable_v<T>);
+  assert(buf.size() >= sizeof(T));
   T obj{};
   std::memcpy(&obj, buf.data(), sizeof(T)); // memcpy is the well-defined way
   return obj;
@@ -130,70 +188,149 @@ struct alignas(CACHE_LINE_SIZE) Quote { // a POD / trivially-copyable type
   char symbol[8];
 };
 
-void test1() {
+// --- Demo 1: single message round-trip -------------------------------------
+inline void test_basic() {
+  std::println("--- test_basic ---");
   fast_queue fq;
   producer p;
-  p.next_element = fq.buffer.data();
   consumer c;
-  c.next_element = fq.buffer.data();
 
   Quote q{1'700'000'000ULL, 101.25, 500, "AAPL"};
-  auto bytes = to_bytes(q);
-  std::span<std::byte> data{bytes};
-  p.write(fq, data);
+  const auto bytes = to_bytes(q);
+  bool ok = p.try_write(fq, std::span<const std::byte>{bytes});
+  std::println("write ok: {}", ok);
 
   std::array<std::byte, sizeof(Quote)> buf{};
-  auto ret = c.try_read(fq, buf);
-  std::println("ret:{}", ret);
-  Quote q1{};
-  if (ret) {
-    q1 = from_bytes<Quote>(buf);
-  }
+  auto n = c.try_read(fq, buf);
+  assert(n && *n == sizeof(Quote));
+  const auto q1 = from_bytes<Quote>(buf);
   std::println("q1 ts:{}, size:{}, price:{}, symbol:{}", q1.ts, q1.size,
                q1.price, q1.symbol);
+  assert(!c.try_read(fq, buf) && "queue should be empty now");
 }
 
-void test2() {
+// --- Demo 2: the limit check --------------------------------------------
+// Fill the queue exactly to capacity, confirm the next write is rejected, then
+// drain it in order. This exercises "counters checked against the limits".
+inline void test_limits() {
+  std::println("--- test_limits ---");
   fast_queue fq;
   producer p;
-  p.next_element = fq.buffer.data();
   consumer c;
-  c.next_element = fq.buffer.data();
 
-  std::thread t2([&fq, &c]() {
-    std::println("t2 starting...");
-    std::array<std::byte, sizeof(Quote)> buf{};
-    while (true) {
-      while (!c.try_read(fq, buf)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-      }
-      auto q = from_bytes<Quote>(buf);
-      std::println("q ts:{}, size:{}, price:{}, symbol:{}", q.ts, q.size,
-                   q.price, q.symbol);
+  constexpr std::size_t rec = sizeof(header_t) + sizeof(std::uint32_t);
+  constexpr std::size_t capacity = QUEUE_SIZE / rec; // exact fit
+
+  std::uint32_t v = 0;
+  std::size_t written = 0;
+  while (true) {
+    const auto bytes = to_bytes(v);
+    if (!p.try_write(fq, std::span<const std::byte>{bytes})) {
+      break; // full - limit reached
     }
-    std::println("t2 terminating...");
+    ++v;
+    ++written;
+  }
+  std::println("filled {} messages (capacity {})", written, capacity);
+  assert(written == capacity && "should fill exactly up to the limit");
+
+  // One more must be rejected: the counters correctly report the queue is full.
+  const auto extra = to_bytes(v);
+  assert(!p.try_write(fq, std::span<const std::byte>{extra}) &&
+         "queue must report full");
+
+  // Drain everything back out, in order, without loss.
+  std::array<std::byte, sizeof(std::uint32_t)> out{};
+  for (std::uint32_t expect = 0; expect < written; ++expect) {
+    auto n = c.try_read(fq, out);
+    assert(n && *n == sizeof(std::uint32_t));
+    assert(from_bytes<std::uint32_t>(out) == expect && "out of order / lost");
+  }
+  assert(!c.try_read(fq, out) && "queue must now be empty");
+  std::println("test_limits PASSED");
+}
+
+// --- Demo 3: full end-to-end stress -------------------------------------
+// Two threads pump N variable-sized messages through the small ring. Because
+// the ring is tiny relative to N, it fills up and wraps around tens of
+// thousands of times. The consumer verifies that every message arrives exactly
+// once, in order, byte-for-byte - i.e. no loss, no duplication, no corruption.
+inline void test_full_ring() {
+  std::println("--- test_full_ring ---");
+  constexpr std::uint64_t N = 1'000'000;
+
+  fast_queue fq;
+  producer prod;
+  consumer cons;
+
+  // Variable payload length (8..44 bytes) so records wrap at unaligned offsets,
+  // exercising the split-memcpy path in ring_write / ring_read. The first 8
+  // bytes carry the sequence number; the rest is a deterministic filler derived
+  // from the sequence number so the consumer can validate the content too.
+  auto make_payload = [](std::uint64_t seq) {
+    const std::size_t extra = static_cast<std::size_t>(seq % 37);
+    std::vector<std::byte> p(sizeof(std::uint64_t) + extra);
+    std::memcpy(p.data(), &seq, sizeof(seq));
+    for (std::size_t i = 0; i < extra; ++i) {
+      p[sizeof(seq) + i] = static_cast<std::byte>((seq + i) & 0xFF);
+    }
+    return p;
+  };
+
+  std::atomic<std::uint64_t> full_events{0};
+
+  std::thread producer_thread([&] {
+    std::uint64_t fulls = 0;
+    for (std::uint64_t seq = 0; seq < N; ++seq) {
+      const auto payload = make_payload(seq);
+      std::span<const std::byte> span{payload};
+      // Back-pressure: spin until there is room. This is what drives the queue
+      // to full without ever dropping a message.
+      while (!prod.try_write(fq, span)) {
+        ++fulls;
+        std::this_thread::yield();
+      }
+    }
+    full_events.store(fulls, std::memory_order_relaxed);
   });
 
-  std::thread t1([&fq, &p]() {
-    std::println("t1 starting...");
-    Quote q{1'700'000'000ULL, 101.25, 500, "AAPL"};
-    auto bytes = to_bytes(q);
-    std::span<std::byte> data{bytes};
-    p.write(fq, data);
-    std::this_thread::sleep_for(std::chrono::milliseconds(60));
-    q.price = 111.25;
-    bytes = to_bytes(q);
-    std::span<std::byte> data1{bytes};
-    p.write(fq, data1);
-    std::println("t1 terminating...");
+  std::thread consumer_thread([&] {
+    std::array<std::byte, QUEUE_SIZE> out{};
+    std::uint64_t expected = 0;
+    while (expected < N) {
+      auto n = cons.try_read(fq, out);
+      if (!n) {
+        std::this_thread::yield();
+        continue;
+      }
+      std::uint64_t seq{};
+      assert(*n >= sizeof(seq));
+      std::memcpy(&seq, out.data(), sizeof(seq));
+      assert(seq == expected && "out of order or lost message");
+
+      const std::size_t extra = *n - sizeof(seq);
+      for (std::size_t i = 0; i < extra; ++i) {
+        assert(out[sizeof(seq) + i] ==
+                   static_cast<std::byte>((seq + i) & 0xFF) &&
+               "payload corrupted");
+      }
+      ++expected;
+    }
+    assert(expected == N);
   });
 
-  t1.join();
-  t2.join();
+  producer_thread.join();
+  consumer_thread.join();
+
+  std::println("delivered {} messages in order, byte-for-byte, no loss", N);
+  std::println("producer hit a full queue {} times (back-pressure exercised)",
+               full_events.load(std::memory_order_relaxed));
+  std::println("test_full_ring PASSED");
 }
 
 inline void test() {
-  // test1();
-  test2();
+  test_basic();
+  test_limits();
+  test_full_ring();
 }
 } // namespace fast_queue
