@@ -103,11 +103,11 @@ struct producer {
     // Check the free space against the limit. First use the cached tail to
     // avoid touching the consumer's cache line on every call; only refresh from
     // the shared counter if that suggests we might be full.
-    std::uint64_t bytes_available = write_counter - read_counter;
-    if (bytes_available + record_size > QUEUE_SIZE) {
+    std::uint64_t bytes_available_to_read = write_counter - read_counter;
+    if (bytes_available_to_read + record_size > QUEUE_SIZE) {
       read_counter = fq.read_counter.load(std::memory_order_acquire);
-      bytes_available = write_counter - read_counter;
-      if (bytes_available + record_size > QUEUE_SIZE) {
+      bytes_available_to_read = write_counter - read_counter;
+      if (bytes_available_to_read + record_size > QUEUE_SIZE) {
         return false; // genuinely full
       }
     }

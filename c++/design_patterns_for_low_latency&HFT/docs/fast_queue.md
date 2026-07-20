@@ -41,13 +41,13 @@ The number of bytes currently *available to read* (written but not yet read) is
 simply:
 
 ```
-bytes_available = write_counter - read_counter   // always in [0, QUEUE_SIZE]
+bytes_available_to_read = write_counter - read_counter   // always in [0, QUEUE_SIZE]
 ```
 
 From that single quantity we derive the two boundary states:
 
 ```
-empty  ⇔  write_counter == read_counter          (bytes_available == 0)
+empty  ⇔  write_counter == read_counter          (bytes_available_to_read == 0)
 full   ⇔  write_counter - read_counter == QUEUE_SIZE
 ```
 
@@ -176,17 +176,17 @@ std::uint64_t read_counter{0};  // last value it observed of the tail
 ### Step 1 — the limit check (back-pressure)
 
 ```cpp
-std::uint64_t bytes_available = write_counter - read_counter;
-if (bytes_available + record_size > QUEUE_SIZE) {                 // maybe full?
+std::uint64_t bytes_available_to_read = write_counter - read_counter;
+if (bytes_available_to_read + record_size > QUEUE_SIZE) {         // maybe full?
   read_counter = fq.read_counter.load(std::memory_order_acquire); // refresh
-  bytes_available = write_counter - read_counter;
-  if (bytes_available + record_size > QUEUE_SIZE)
+  bytes_available_to_read = write_counter - read_counter;
+  if (bytes_available_to_read + record_size > QUEUE_SIZE)
     return false;                                                 // truly full
 }
 ```
 
 This is the core of *"counters checked against the limits."* We only accept the
-write if `bytes_available + record_size <= QUEUE_SIZE`, i.e. the new record fits
+write if `bytes_available_to_read + record_size <= QUEUE_SIZE`, i.e. the new record fits
 in the free space.
 
 Two subtleties make this both **fast** and **correct**:
@@ -201,8 +201,8 @@ Two subtleties make this both **fast** and **correct**:
 - **Addition, not subtraction, avoids unsigned underflow.** A stale private
   `read_counter` is always ≤ the real tail, so `write_counter - read_counter`
   *over*-estimates the bytes available — it can even exceed `QUEUE_SIZE`. Writing
-  the test as `bytes_available + record_size > QUEUE_SIZE` keeps both sides as
-  well-defined additions. The naive form `QUEUE_SIZE - bytes_available <
+  the test as `bytes_available_to_read + record_size > QUEUE_SIZE` keeps both sides as
+  well-defined additions. The naive form `QUEUE_SIZE - bytes_available_to_read <
   record_size` would
   underflow the unsigned subtraction and wrongly report free space. The
   over-estimate only ever triggers a *refresh*, never a false accept — so it is
