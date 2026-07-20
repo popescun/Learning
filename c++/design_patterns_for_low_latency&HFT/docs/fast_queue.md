@@ -54,62 +54,88 @@ full   ⇔  write_counter - read_counter == QUEUE_SIZE
 Because empty vs. full is decided by the **difference** of two ever-growing
 counters — not by comparing wrapped read/write *positions* — there is no
 ambiguity between "empty" and "full" and therefore **no wasted slot**. The
-entire `QUEUE_SIZE` bytes are usable. (Classic pointer-based ring buffers have
-to leave one slot empty to tell the two states apart; this design does not.)
+entire `QUEUE_SIZE` bytes are usable. (Classic pointer-based ring buffers store
+two *wrapped* indices, which can't tell empty from full on their own; they need
+one extra bit of state — commonly by leaving a slot empty. This design gets that
+bit for free from the counter difference.)
 
-#### Why classic ring buffers waste a slot
+#### Convention
 
-A textbook ring buffer keeps two indices that point *into* the buffer, each
-wrapping via modulo:
+Throughout, `head` and `tail` are counters that **advance by one per byte** —
+`head` on every write, `tail` on every read. Only the producer moves `head`;
+only the consumer moves `tail`. This design uses **advance-on-write**: a byte is
+written at `head`'s slot and *then* `head` is incremented (never the reverse).
+Emptiness and fullness are questions about the *gap* between the two counters.
 
-```
-head = write position   (0 .. N-1)
-tail = read position    (0 .. N-1)
-```
+#### Why two wrapped indices can't tell empty from full
 
-- **Empty** is naturally `head == tail` (the reader has caught up to the writer).
-- **Full** is *also* `head == tail`: writing enough to wrap the head all the way
-  back around brings the two indices together again.
+Suppose you store `head` and `tail` as **wrapped** indices in `[0, N)`, the
+textbook ring buffer. The pair then reveals only their difference
+`d = (head - tail) mod N` — `N` possible values — while the fill level has
+`N + 1` (`0, 1, … N` bytes). `N` labels cannot cover `N + 1` states, so exactly
+one pair of fill levels collides onto the same `head == tail`.
 
-So `head == tail` means *both* empty and full, and you cannot tell which. The
-indices live in `[0, N)` — only `N` distinct values — but the fill level has
-`N + 1` possible states (0, 1, … N bytes). `N` slots cannot encode `N + 1`
-states, so one state is unrepresentable.
+*Which* pair collides is decided purely by the fencepost, and you can slide it but
+never remove it:
 
-The usual fix is to **sacrifice one slot**: declare the buffer full when
-advancing the head *would* collide with the tail, i.e. `(head + 1) % N == tail`.
-Now the two states are distinguishable, but one slot is never used:
+- **advance-on-write** (write at `head`, then `head += 1`) — the collision is at
+  the **top**. Writing `N` bytes wraps `head` all the way back onto `tail`:
 
-```
-N = 8, one slot always kept empty:
-[ A ][ B ][ C ][ D ][ E ][ F ][ G ][   ]   <- "full", slot 7 unused
-                                     ^ tail
-                                 ^ head + 1 == tail
-```
+  ```
+  N = 8, start empty:  head = tail = 3
+  write 8 bytes  →  head = (3 + 8) mod 8 = 3 == tail    // FULL looks empty
+  ```
 
-A 1024-byte buffer effectively holds 1023.
+- **write-in-place** (write at `head`, `head += 1` only *between* bytes) — the
+  collision moves to the **bottom**. The very first byte leaves `head` put:
 
-#### Why this design uses the whole buffer
+  ```
+  N = 8, start empty:  head = tail = 3
+  write 1 byte   →  head = (3 + 0) mod 8 = 3 == tail    // 1 byte looks empty
+  ```
 
-Here the counters are **monotonically increasing absolute byte totals**, not
-positions in `[0, N)`. The state is derived from their difference, which lives in
-`[0, N]` — that is `N + 1` distinct values, exactly enough to represent every
-fill level:
+Either fencepost leaves one fill level unrepresentable — the "wasted slot,"
+whichever end it lands on. No test on two wrapped indices can recover it; the
+distinguishing bit was never stored.
+
+To break the tie you need **one extra bit of state** beyond two wrapped indices.
+Common options: waste a slot (declare full at `(head + 1) % N == tail`, capping
+usable bytes at `N − 1`); keep a separate byte count `0 … N`; or **don't wrap the
+counters at all** — which is what this design does.
+
+#### Why this design uses the whole buffer: absolute counters, mask only for addressing
+
+The key move is to **separate the two jobs a ring-buffer index performs**:
+
+1. **Decide empty / full** — from the *absolute, never-wrapped* counters.
+2. **Find the physical slot** — with `& QUEUE_MASK`, and *only* here.
+
+`write_counter` and `read_counter` are monotonically increasing byte totals that
+are **never reduced mod N**. Their true difference therefore lands in `[0, N]` —
+all `N + 1` fill levels, with no fold:
 
 ```
 bytes_available_to_read = write_counter - read_counter   // in [0, QUEUE_SIZE]
-
 empty ⇔ difference == 0
 full  ⇔ difference == QUEUE_SIZE
 ```
 
-Because `0` and `N` are different numbers, empty and full are never confused —
-even though both map to the *same physical offset* (`head & MASK == tail & MASK`).
-The wrap that made the classic scheme ambiguous is invisible to the bookkeeping:
-the counters keep climbing past `N`, `2N`, `3N`… and are only masked down when
-memory is actually touched (see *Mapping a counter to a buffer position — a
-bit-mask, not a modulo* below).
-All `QUEUE_SIZE` bytes are usable — no sacrificed slot.
+With advance-on-write and un-wrapped counters, a full queue is e.g. `head = 11`,
+`tail = 3` → difference `8`, plainly distinct from empty's difference `0` — even
+though both map to the *same* slot (`11 & MASK == 3 & MASK == 3`). The wrap that
+sank the classic scheme is invisible to the empty/full test, because that test
+never looks at a wrapped value.
+
+Modulo enters exactly once, and only to answer "*where* in the buffer," never
+"*how full*":
+
+```
+offset_in_buffer = counter & QUEUE_MASK     // == counter % QUEUE_SIZE
+```
+
+(see *Mapping a counter to a buffer position — a bit-mask, not a modulo* below).
+Keep the counters absolute for the state decision, apply the mask solely for
+addressing, and all `QUEUE_SIZE` bytes are usable — no sacrificed slot.
 
 The trade this makes is relying on the counters not overflowing. With
 `uint64_t` byte counters, even at 10 GB/s that takes ~58 years, which is why we
