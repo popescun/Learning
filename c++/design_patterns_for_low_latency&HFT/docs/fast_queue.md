@@ -37,16 +37,17 @@ they only ever go up, they are *never* wrapped or reset. A 64-bit counter of
 bytes will not overflow in any realistic runtime (at 100 GB/s it would take
 ~58 years), so we never have to worry about counter wrap.
 
-The number of bytes currently *in flight* (written but not yet read) is simply:
+The number of bytes currently *available to read* (written but not yet read) is
+simply:
 
 ```
-in_flight = write_counter - read_counter        // always in [0, QUEUE_SIZE]
+bytes_available = write_counter - read_counter   // always in [0, QUEUE_SIZE]
 ```
 
 From that single quantity we derive the two boundary states:
 
 ```
-empty  ⇔  write_counter == read_counter          (in_flight == 0)
+empty  ⇔  write_counter == read_counter          (bytes_available == 0)
 full   ⇔  write_counter - read_counter == QUEUE_SIZE
 ```
 
@@ -169,38 +170,40 @@ The producer keeps two **private** (non-atomic) variables:
 
 ```cpp
 std::uint64_t write_counter{0}; // its own copy of the head
-std::uint64_t cached_read{0};   // last value it observed of the tail
+std::uint64_t read_counter{0};  // last value it observed of the tail
 ```
 
 ### Step 1 — the limit check (back-pressure)
 
 ```cpp
-std::uint64_t in_flight = write_counter - cached_read;
-if (in_flight + record_size > QUEUE_SIZE) {                       // maybe full?
-  cached_read = fq.read_counter.load(std::memory_order_acquire);  // refresh
-  in_flight = write_counter - cached_read;
-  if (in_flight + record_size > QUEUE_SIZE)
+std::uint64_t bytes_available = write_counter - read_counter;
+if (bytes_available + record_size > QUEUE_SIZE) {                 // maybe full?
+  read_counter = fq.read_counter.load(std::memory_order_acquire); // refresh
+  bytes_available = write_counter - read_counter;
+  if (bytes_available + record_size > QUEUE_SIZE)
     return false;                                                 // truly full
 }
 ```
 
 This is the core of *"counters checked against the limits."* We only accept the
-write if `in_flight + record_size <= QUEUE_SIZE`, i.e. the new record fits in the
-free space.
+write if `bytes_available + record_size <= QUEUE_SIZE`, i.e. the new record fits
+in the free space.
 
 Two subtleties make this both **fast** and **correct**:
 
-- **Cached tail first.** Reading the consumer's `read_counter` atomic touches a
-  cache line the consumer keeps writing, which is expensive. So we first test
-  against `cached_read` (a stale, private snapshot). Only if *that* says we might
-  be full do we pay for the real atomic load and re-test. On the common path
-  (queue not full) the atomic is never touched.
+- **Cached tail first.** Reading the consumer's shared `read_counter` atomic
+  touches a cache line the consumer keeps writing, which is expensive. So we
+  first test against the producer's private `read_counter` (a stale snapshot of
+  the tail). Only if *that* says we might be full do we pay for the real atomic
+  load and re-test. On the common path (queue not full) the atomic is never
+  touched.
 
-- **Addition, not subtraction, avoids unsigned underflow.** A stale `cached_read`
-  is always ≤ the real tail, so `write_counter - cached_read` *over*-estimates
-  the bytes in flight — it can even exceed `QUEUE_SIZE`. Writing the test as
-  `in_flight + record_size > QUEUE_SIZE` keeps both sides as well-defined
-  additions. The naive form `QUEUE_SIZE - in_flight < record_size` would
+- **Addition, not subtraction, avoids unsigned underflow.** A stale private
+  `read_counter` is always ≤ the real tail, so `write_counter - read_counter`
+  *over*-estimates the bytes available — it can even exceed `QUEUE_SIZE`. Writing
+  the test as `bytes_available + record_size > QUEUE_SIZE` keeps both sides as
+  well-defined additions. The naive form `QUEUE_SIZE - bytes_available <
+  record_size` would
   underflow the unsigned subtraction and wrongly report free space. The
   over-estimate only ever triggers a *refresh*, never a false accept — so it is
   conservative and safe.
@@ -241,23 +244,23 @@ queue was empty. The consumer keeps its own private mirror:
 
 ```cpp
 std::uint64_t read_counter{0};  // its own copy of the tail
-std::uint64_t cached_write{0};  // last value it observed of the head
+std::uint64_t write_counter{0}; // last value it observed of the head
 ```
 
 ### Step 1 — the empty check
 
 ```cpp
-if (read_counter == cached_write) {
-  cached_write = fq.write_counter.load(std::memory_order_acquire);  // refresh
-  if (read_counter == cached_write)
-    return std::nullopt;                                            // empty
+if (read_counter == write_counter) {
+  write_counter = fq.write_counter.load(std::memory_order_acquire);  // refresh
+  if (read_counter == write_counter)
+    return std::nullopt;                                             // empty
 }
 ```
 
 Same cached-first / refresh-on-demand trick as the producer, in reverse: only
 when the cached head says "nothing new" do we pay for the real atomic load.
 
-The invariant `read_counter <= cached_write` always holds (the consumer only ever
+The invariant `read_counter <= write_counter` always holds (the consumer only ever
 advances `read_counter` up to a head value it has actually observed, and heads are
 published on whole-record boundaries), so a simple `==` test correctly detects
 emptiness — it can never step past the producer into unwritten bytes.
@@ -274,7 +277,7 @@ ring_read(fq, read_counter + sizeof(len), out.data(), len); // 2. read payload
 The header is read first to learn the payload length, then exactly that many
 payload bytes are copied out — correctly reconstructing a variable-sized message.
 Because the producer published `write_counter` only *after* fully writing the
-record, and the consumer never reads beyond `cached_write`, a complete record is
+record, and the consumer never reads beyond `write_counter`, a complete record is
 always present before it is read.
 
 ### Step 3 — publish the freed space

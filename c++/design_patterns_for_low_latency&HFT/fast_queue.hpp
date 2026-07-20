@@ -51,8 +51,8 @@ using header_t = std::int32_t;
  *  - read_counter:  total bytes consumed by the consumer  (tail). Written by
  *    the consumer, read by the producer.
  *
- * The number of bytes currently in flight is (write_counter - read_counter);
- * it is always in the range [0, QUEUE_SIZE].
+ * The number of bytes currently available to read is (write_counter -
+ * read_counter); it is always in the range [0, QUEUE_SIZE].
  *  - empty  <=> write_counter == read_counter
  *  - full   <=> write_counter - read_counter == QUEUE_SIZE
  *
@@ -103,11 +103,11 @@ struct producer {
     // Check the free space against the limit. First use the cached tail to
     // avoid touching the consumer's cache line on every call; only refresh from
     // the shared counter if that suggests we might be full.
-    std::uint64_t in_flight = write_counter - cached_read;
-    if (in_flight + record_size > QUEUE_SIZE) {
-      cached_read = fq.read_counter.load(std::memory_order_acquire);
-      in_flight = write_counter - cached_read;
-      if (in_flight + record_size > QUEUE_SIZE) {
+    std::uint64_t bytes_available = write_counter - read_counter;
+    if (bytes_available + record_size > QUEUE_SIZE) {
+      read_counter = fq.read_counter.load(std::memory_order_acquire);
+      bytes_available = write_counter - read_counter;
+      if (bytes_available + record_size > QUEUE_SIZE) {
         return false; // genuinely full
       }
     }
@@ -128,7 +128,7 @@ struct producer {
   }
 
   std::uint64_t write_counter{0}; // private copy of the head
-  std::uint64_t cached_read{0};   // last observed tail (consumer progress)
+  std::uint64_t read_counter{0};  // last observed tail (consumer progress)
 };
 
 struct consumer {
@@ -139,9 +139,9 @@ struct consumer {
   std::optional<std::size_t> try_read(fast_queue &fq,
                                       std::span<std::byte> out) {
     // Empty check. Use the cached head first, refresh only when it looks empty.
-    if (read_counter == cached_write) {
-      cached_write = fq.write_counter.load(std::memory_order_acquire);
-      if (read_counter == cached_write) {
+    if (read_counter == write_counter) {
+      write_counter = fq.write_counter.load(std::memory_order_acquire);
+      if (read_counter == write_counter) {
         return std::nullopt; // nothing to read
       }
     }
@@ -162,8 +162,8 @@ struct consumer {
     return static_cast<std::size_t>(len);
   }
 
-  std::uint64_t read_counter{0}; // private copy of the tail
-  std::uint64_t cached_write{0}; // last observed head (producer progress)
+  std::uint64_t read_counter{0};  // private copy of the tail
+  std::uint64_t write_counter{0}; // last observed head (producer progress)
 };
 
 template <class T> std::array<std::byte, sizeof(T)> to_bytes(const T &obj) {
