@@ -107,7 +107,8 @@ Because `0` and `N` are different numbers, empty and full are never confused —
 even though both map to the *same physical offset* (`head & MASK == tail & MASK`).
 The wrap that made the classic scheme ambiguous is invisible to the bookkeeping:
 the counters keep climbing past `N`, `2N`, `3N`… and are only masked down when
-memory is actually touched (see *Mapping a counter to a buffer position* below).
+memory is actually touched (see *Mapping a counter to a buffer position — a
+bit-mask, not a modulo* below).
 All `QUEUE_SIZE` bytes are usable — no sacrificed slot.
 
 The trade this makes is relying on the counters not overflowing. With
@@ -116,24 +117,30 @@ never worry about counter wrap. Classic 32-bit position indices dodge overflow
 but pay the empty-slot tax instead; for a 64-bit queue the difference-of-counters
 trade is clearly the better one.
 
-### Mapping a counter to a buffer position
+### Mapping a counter to a buffer position — a bit-mask, not a modulo
 
-The physical location of any logical byte offset is obtained with a bit-mask:
+**The offset is `counter % QUEUE_SIZE`, but we compute it as `counter &
+QUEUE_MASK` — a single-instruction bit-mask instead of an expensive `%`
+divide.** The two are identical because `QUEUE_SIZE` is a power of two.
 
 ```
-offset_in_buffer = counter & QUEUE_MASK           // QUEUE_MASK = QUEUE_SIZE - 1
+offset_in_buffer = counter & QUEUE_MASK           // == counter % QUEUE_SIZE
+                                                  // QUEUE_MASK = QUEUE_SIZE - 1
 ```
 
-This only works when `QUEUE_SIZE` is a **power of two**, which is enforced at
-compile time:
+Why they're equal: dividing by `2^k` is a shift right by `k`, and the remainder
+is exactly the `k` low bits that get shifted off. `& QUEUE_MASK` keeps precisely
+those low bits, so it *is* the modulo — for a power-of-two divisor only.
+
+This is why the equivalence holds only when `QUEUE_SIZE` is a **power of two**,
+which is enforced at compile time (the assert uses the same trick: a power of two
+has one bit set, so `N & (N - 1) == 0`):
 
 ```
 constexpr std::size_t QUEUE_SIZE = 1024;
-static_assert((QUEUE_SIZE & (QUEUE_SIZE - 1)) == 0, "must be a power of two");
 constexpr std::uint64_t QUEUE_MASK = QUEUE_SIZE - 1;
+static_assert((QUEUE_SIZE & QUEUE_MASK) == 0, "must be a power of two");
 ```
-
-The `& QUEUE_MASK` is one CPU instruction, far cheaper than a `%` modulo.
 
 ### Cache-line alignment (false-sharing avoidance)
 
