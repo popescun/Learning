@@ -35,9 +35,9 @@ namespace fast_queue {
 // modulo.  Keeping it small makes it easy to drive the queue all the way to
 // full and wrap around many times in the tests below.
 constexpr std::size_t QUEUE_SIZE = 1024;
-static_assert((QUEUE_SIZE & (QUEUE_SIZE - 1)) == 0,
-              "QUEUE_SIZE must be a power of two");
 constexpr std::uint64_t QUEUE_MASK = QUEUE_SIZE - 1;
+static_assert((QUEUE_SIZE & QUEUE_MASK) == 0,
+              "QUEUE_SIZE must be a power of two");
 
 // Each message is framed as [int32 length][payload bytes].
 using header_t = std::int32_t;

@@ -57,6 +57,65 @@ ambiguity between "empty" and "full" and therefore **no wasted slot**. The
 entire `QUEUE_SIZE` bytes are usable. (Classic pointer-based ring buffers have
 to leave one slot empty to tell the two states apart; this design does not.)
 
+#### Why classic ring buffers waste a slot
+
+A textbook ring buffer keeps two indices that point *into* the buffer, each
+wrapping via modulo:
+
+```
+head = write position   (0 .. N-1)
+tail = read position    (0 .. N-1)
+```
+
+- **Empty** is naturally `head == tail` (the reader has caught up to the writer).
+- **Full** is *also* `head == tail`: writing enough to wrap the head all the way
+  back around brings the two indices together again.
+
+So `head == tail` means *both* empty and full, and you cannot tell which. The
+indices live in `[0, N)` — only `N` distinct values — but the fill level has
+`N + 1` possible states (0, 1, … N bytes). `N` slots cannot encode `N + 1`
+states, so one state is unrepresentable.
+
+The usual fix is to **sacrifice one slot**: declare the buffer full when
+advancing the head *would* collide with the tail, i.e. `(head + 1) % N == tail`.
+Now the two states are distinguishable, but one slot is never used:
+
+```
+N = 8, one slot always kept empty:
+[ A ][ B ][ C ][ D ][ E ][ F ][ G ][   ]   <- "full", slot 7 unused
+                                     ^ tail
+                                 ^ head + 1 == tail
+```
+
+A 1024-byte buffer effectively holds 1023.
+
+#### Why this design uses the whole buffer
+
+Here the counters are **monotonically increasing absolute byte totals**, not
+positions in `[0, N)`. The state is derived from their difference, which lives in
+`[0, N]` — that is `N + 1` distinct values, exactly enough to represent every
+fill level:
+
+```
+bytes_available_to_read = write_counter - read_counter   // in [0, QUEUE_SIZE]
+
+empty ⇔ difference == 0
+full  ⇔ difference == QUEUE_SIZE
+```
+
+Because `0` and `N` are different numbers, empty and full are never confused —
+even though both map to the *same physical offset* (`head & MASK == tail & MASK`).
+The wrap that made the classic scheme ambiguous is invisible to the bookkeeping:
+the counters keep climbing past `N`, `2N`, `3N`… and are only masked down when
+memory is actually touched (see *Mapping a counter to a buffer position* below).
+All `QUEUE_SIZE` bytes are usable — no sacrificed slot.
+
+The trade this makes is relying on the counters not overflowing. With
+`uint64_t` byte counters, even at 10 GB/s that takes ~58 years, which is why we
+never worry about counter wrap. Classic 32-bit position indices dodge overflow
+but pay the empty-slot tax instead; for a 64-bit queue the difference-of-counters
+trade is clearly the better one.
+
 ### Mapping a counter to a buffer position
 
 The physical location of any logical byte offset is obtained with a bit-mask:
