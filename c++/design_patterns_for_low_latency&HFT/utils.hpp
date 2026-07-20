@@ -24,22 +24,18 @@ struct measure_matched_time {
   [[nodiscard]] auto get_time_ns() const {
     mach_timebase_info_data_t info;
     mach_timebase_info(&info);
-    return static_cast<double>(time_) * static_cast<double>(info.numer) /
-           info.denom;
+    return static_cast<double>(time_) * static_cast<double>(info.numer) / info.denom;
   }
 
   [[nodiscard]] auto get_accumulated_time_ns() const {
     mach_timebase_info_data_t info;
     mach_timebase_info(&info);
-    return static_cast<double>(accumulator_) * static_cast<double>(info.numer) /
-           info.denom;
+    return static_cast<double>(accumulator_) * static_cast<double>(info.numer) / info.denom;
   }
 
   [[nodiscard]] auto get_time_us() const { return get_time_ns() / 1000; }
 
-  [[nodiscard]] auto get_accumulated_time_us() const {
-    return get_accumulated_time_ns() / 1000;
-  }
+  [[nodiscard]] auto get_accumulated_time_us() const { return get_accumulated_time_ns() / 1000; }
 };
 
 struct measure_time {
@@ -65,8 +61,6 @@ struct measure_time {
 
   [[nodiscard]] auto get_time_us() const { return get_time_ns() / 1000; }
 
-  [[nodiscard]] auto get_accumulated_time_us() const {
-    return get_accumulated_time_ns() / 1000;
-  }
+  [[nodiscard]] auto get_accumulated_time_us() const { return get_accumulated_time_ns() / 1000; }
 };
 } // namespace utils

@@ -42,8 +42,7 @@ static void BM_RuntimeDispatch(benchmark::State &state) {
 }
 
 // Benchmark for compile-time dispatch
-template <typename T>
-static void BM_CompileTimeDispatch(benchmark::State &state) {
+template <typename T> static void BM_CompileTimeDispatch(benchmark::State &state) {
   T obj;
   for (auto _ : state) {
     benchmark::DoNotOptimize(obj.function());

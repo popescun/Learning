@@ -20,8 +20,7 @@
 
 #if defined(__cpp_lib_hardware_interference_size)
 #include <new>
-inline constexpr std::size_t CACHE_LINE_SIZE =
-    std::hardware_destructive_interference_size;
+inline constexpr std::size_t CACHE_LINE_SIZE = std::hardware_destructive_interference_size;
 #elif defined(__aarch64__) && defined(__APPLE__)
 inline constexpr std::size_t CACHE_LINE_SIZE = 128; // Apple Silicon
 #else
@@ -36,10 +35,9 @@ namespace fast_queue {
 // full and wrap around many times in the tests below.
 constexpr std::size_t QUEUE_SIZE = 1024;
 constexpr std::uint64_t QUEUE_MASK = QUEUE_SIZE - 1;
-static_assert((QUEUE_SIZE & QUEUE_MASK) == 0,
-              "QUEUE_SIZE must be a power of two");
+static_assert((QUEUE_SIZE & QUEUE_MASK) == 0, "QUEUE_SIZE must be a power of two");
 
-// Each message is framed as [int32 length][payload bytes].
+// Each message record is: [int32 length][payload bytes].
 using header_t = std::int32_t;
 
 /**
@@ -51,8 +49,8 @@ using header_t = std::int32_t;
  *  - read_counter:  total bytes consumed by the consumer  (tail). Written by
  *    the consumer, read by the producer.
  *
- * The number of bytes currently available to read is (write_counter -
- * read_counter); it is always in the range [0, QUEUE_SIZE].
+ * The number of bytes currently available to read = write_counter - read_counter;
+ * it is always in the range [0, QUEUE_SIZE].
  *  - empty  <=> write_counter == read_counter
  *  - full   <=> write_counter - read_counter == QUEUE_SIZE
  *
@@ -68,8 +66,7 @@ struct fast_queue {
 
 // Copy n bytes into the ring starting at logical position `pos`, wrapping
 // around the physical end of the buffer when necessary (circular write).
-inline void ring_write(fast_queue &fq, std::uint64_t pos, const std::byte *src,
-                       std::size_t n) {
+inline void ring_write(fast_queue &fq, std::uint64_t pos, const std::byte *src, std::size_t n) {
   const std::size_t offset = static_cast<std::size_t>(pos & QUEUE_MASK);
   const std::size_t first = std::min(n, QUEUE_SIZE - offset);
   std::memcpy(fq.buffer.data() + offset, src, first);
@@ -80,8 +77,7 @@ inline void ring_write(fast_queue &fq, std::uint64_t pos, const std::byte *src,
 
 // Copy n bytes out of the ring starting at logical position `pos`, wrapping
 // around the physical end of the buffer when necessary (circular read).
-inline void ring_read(const fast_queue &fq, std::uint64_t pos, std::byte *dst,
-                      std::size_t n) {
+inline void ring_read(const fast_queue &fq, std::uint64_t pos, std::byte *dst, std::size_t n) {
   const std::size_t offset = static_cast<std::size_t>(pos & QUEUE_MASK);
   const std::size_t first = std::min(n, QUEUE_SIZE - offset);
   std::memcpy(dst, fq.buffer.data() + offset, first);
@@ -116,8 +112,7 @@ struct producer {
     // through ring_write so a record that reaches the end of the buffer wraps
     // around to the beginning.
     const auto len = static_cast<header_t>(payload.size());
-    ring_write(fq, write_counter, reinterpret_cast<const std::byte *>(&len),
-               sizeof(len));
+    ring_write(fq, write_counter, reinterpret_cast<const std::byte *>(&len), sizeof(len));
     ring_write(fq, write_counter + sizeof(len), payload.data(), payload.size());
 
     write_counter += record_size;
@@ -136,8 +131,7 @@ struct consumer {
    * Try to read one message into `out`. Returns the number of payload bytes
    * read, or std::nullopt when the queue is empty.
    */
-  std::optional<std::size_t> try_read(fast_queue &fq,
-                                      std::span<std::byte> out) {
+  std::optional<std::size_t> try_read(fast_queue &fq, std::span<std::byte> out) {
     // Empty check. Use the cached head first, refresh only when it looks empty.
     if (read_counter == write_counter) {
       write_counter = fq.write_counter.load(std::memory_order_acquire);
@@ -147,13 +141,11 @@ struct consumer {
     }
 
     header_t len{};
-    ring_read(fq, read_counter, reinterpret_cast<std::byte *>(&len),
-              sizeof(len));
+    ring_read(fq, read_counter, reinterpret_cast<std::byte *>(&len), sizeof(len));
     assert(len >= 0 && static_cast<std::size_t>(len) <= out.size() &&
            "output buffer isn't large enough for the message");
 
-    ring_read(fq, read_counter + sizeof(len), out.data(),
-              static_cast<std::size_t>(len));
+    ring_read(fq, read_counter + sizeof(len), out.data(), static_cast<std::size_t>(len));
 
     const std::size_t record_size = sizeof(len) + static_cast<std::size_t>(len);
     read_counter += record_size;
@@ -204,8 +196,7 @@ inline void test_basic() {
   auto n = c.try_read(fq, buf);
   assert(n && *n == sizeof(Quote));
   const auto q1 = from_bytes<Quote>(buf);
-  std::println("q1 ts:{}, size:{}, price:{}, symbol:{}", q1.ts, q1.size,
-               q1.price, q1.symbol);
+  std::println("q1 ts:{}, size:{}, price:{}, symbol:{}", q1.ts, q1.size, q1.price, q1.symbol);
   assert(!c.try_read(fq, buf) && "queue should be empty now");
 }
 
@@ -236,8 +227,7 @@ inline void test_limits() {
 
   // One more must be rejected: the counters correctly report the queue is full.
   const auto extra = to_bytes(v);
-  assert(!p.try_write(fq, std::span<const std::byte>{extra}) &&
-         "queue must report full");
+  assert(!p.try_write(fq, std::span<const std::byte>{extra}) && "queue must report full");
 
   // Drain everything back out, in order, without loss.
   std::array<std::byte, sizeof(std::uint32_t)> out{};
@@ -310,8 +300,7 @@ inline void test_full_ring() {
 
       const std::size_t extra = *n - sizeof(seq);
       for (std::size_t i = 0; i < extra; ++i) {
-        assert(out[sizeof(seq) + i] ==
-                   static_cast<std::byte>((seq + i) & 0xFF) &&
+        assert(out[sizeof(seq) + i] == static_cast<std::byte>((seq + i) & 0xFF) &&
                "payload corrupted");
       }
       ++expected;
