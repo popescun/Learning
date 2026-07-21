@@ -61,11 +61,16 @@ bit for free from the counter difference.)
 
 #### Convention
 
-Throughout, `head` and `tail` are counters that **advance by one per byte** —
-`head` on every write, `tail` on every read. Only the producer moves `head`;
-only the consumer moves `tail`. This design uses **advance-on-write**: a byte is
-written at `head`'s slot and *then* `head` is incremented (never the reverse).
-Emptiness and fullness are questions about the *gap* between the two counters.
+Throughout, `head` and `tail` are **byte counters**. A write or read transfers a
+whole message at once, so `head` and `tail` don't step one byte at a time —
+each advances by the **size of the message in bytes**: `head` by the bytes
+written on every write, `tail` by the bytes read on every read. The per-byte
+framing used in some of the examples below is just an illustrative special case
+(a one-byte message); the counters always move in message-sized steps. Only the
+producer moves `head`; only the consumer moves `tail`. This design uses
+**advance-on-write**: the message is written starting at `head`'s slot and
+*then* `head` is advanced past it (never the reverse). Emptiness and fullness are
+questions about the *gap* between the two counters.
 
 #### Why two wrapped indices can't tell empty from full
 
