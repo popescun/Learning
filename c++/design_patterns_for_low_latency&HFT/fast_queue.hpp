@@ -64,23 +64,23 @@ struct fast_queue {
   alignas(CACHE_LINE_SIZE) std::array<std::byte, QUEUE_SIZE> buffer{};
 };
 
-// Copy n bytes into the ring starting at logical position `pos`, wrapping
-// around the physical end of the buffer when necessary (circular write).
-inline void ring_write(fast_queue &fq, std::uint64_t pos, const std::byte *src, std::size_t n) {
-  const std::size_t offset = static_cast<std::size_t>(pos & QUEUE_MASK);
-  const std::size_t first = std::min(n, QUEUE_SIZE - offset);
-  std::memcpy(fq.buffer.data() + offset, src, first);
+// Copy n bytes into the ring starting at logical(absolute) counter `counter`, wrapping around the
+// physical end of the buffer when necessary (circular write).
+inline void ring_write(fast_queue &fq, std::uint64_t counter, const std::byte *src, std::size_t n) {
+  const auto index = static_cast<std::size_t>(counter & QUEUE_MASK);
+  const std::size_t first = std::min(n, QUEUE_SIZE - index);
+  std::memcpy(fq.buffer.data() + index, src, first);
   if (n > first) { // the record straddles the end -> continue at the start
     std::memcpy(fq.buffer.data(), src + first, n - first);
   }
 }
 
-// Copy n bytes out of the ring starting at logical position `pos`, wrapping
-// around the physical end of the buffer when necessary (circular read).
-inline void ring_read(const fast_queue &fq, std::uint64_t pos, std::byte *dst, std::size_t n) {
-  const std::size_t offset = static_cast<std::size_t>(pos & QUEUE_MASK);
-  const std::size_t first = std::min(n, QUEUE_SIZE - offset);
-  std::memcpy(dst, fq.buffer.data() + offset, first);
+// Copy n bytes out of the ring starting at logical(absolute) counter `counter`, wrapping around the
+// physical end of the buffer when necessary (circular read).
+inline void ring_read(const fast_queue &fq, std::uint64_t counter, std::byte *dst, std::size_t n) {
+  const auto index = static_cast<std::size_t>(counter & QUEUE_MASK);
+  const std::size_t first = std::min(n, QUEUE_SIZE - index);
+  std::memcpy(dst, fq.buffer.data() + index, first);
   if (n > first) {
     std::memcpy(dst + first, fq.buffer.data(), n - first);
   }
@@ -93,7 +93,8 @@ struct producer {
    * gives us back-pressure and guarantees the consumer never loses data.
    */
   bool try_write(fast_queue &fq, std::span<const std::byte> payload) {
-    const std::size_t record_size = sizeof(header_t) + payload.size();
+    const auto payload_size = static_cast<header_t>(payload.size());
+    const std::size_t record_size = sizeof(header_t) + payload_size;
     assert(record_size <= QUEUE_SIZE && "message larger than the whole queue");
 
     // Check the free space against the limit. First use the cached tail to
@@ -108,12 +109,12 @@ struct producer {
       }
     }
 
-    // Frame the message: length prefix followed by the payload. Both copies go
-    // through ring_write so a record that reaches the end of the buffer wraps
-    // around to the beginning.
-    const auto len = static_cast<header_t>(payload.size());
-    ring_write(fq, write_counter, reinterpret_cast<const std::byte *>(&len), sizeof(len));
-    ring_write(fq, write_counter + sizeof(len), payload.data(), payload.size());
+    // Write the message: payload size prefix followed by the payload. Both copies go
+    // through ring_write so a record that reaches the end of the buffer wraps around
+    // to the beginning.
+    ring_write(fq, write_counter, reinterpret_cast<const std::byte *>(&payload_size),
+               sizeof(payload_size));
+    ring_write(fq, write_counter + sizeof(payload_size), payload.data(), payload.size());
 
     write_counter += record_size;
     // Publish: everything up to write_counter is now safe for the consumer to
@@ -140,18 +141,19 @@ struct consumer {
       }
     }
 
-    header_t len{};
-    ring_read(fq, read_counter, reinterpret_cast<std::byte *>(&len), sizeof(len));
-    assert(len >= 0 && static_cast<std::size_t>(len) <= out.size() &&
+    header_t payload_size{};
+    ring_read(fq, read_counter, reinterpret_cast<std::byte *>(&payload_size), sizeof(payload_size));
+    assert(payload_size >= 0 && static_cast<std::size_t>(payload_size) <= out.size() &&
            "output buffer isn't large enough for the message");
 
-    ring_read(fq, read_counter + sizeof(len), out.data(), static_cast<std::size_t>(len));
+    ring_read(fq, read_counter + sizeof(payload_size), out.data(),
+              static_cast<std::size_t>(payload_size));
 
-    const std::size_t record_size = sizeof(len) + static_cast<std::size_t>(len);
+    const std::size_t record_size = sizeof(payload_size) + static_cast<std::size_t>(payload_size);
     read_counter += record_size;
     // Publish: the producer may now reuse the space we just consumed.
     fq.read_counter.store(read_counter, std::memory_order_release);
-    return static_cast<std::size_t>(len);
+    return static_cast<std::size_t>(payload_size);
   }
 
   std::uint64_t read_counter{0};  // private copy of the tail
