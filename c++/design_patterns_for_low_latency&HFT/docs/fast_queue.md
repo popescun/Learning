@@ -234,19 +234,22 @@ Because storage is circular, a record that starts near the end of the buffer can
 that by splitting the copy in (at most) two `memcpy`s:
 
 ```cpp
-inline void ring_write(fast_queue &fq, std::uint64_t pos,
+inline void ring_write(fast_queue &fq, std::uint64_t counter,
                        const std::byte *src, std::size_t n) {
-  const std::size_t offset = pos & QUEUE_MASK;
-  const std::size_t first  = std::min(n, QUEUE_SIZE - offset); // bytes until end
-  std::memcpy(fq.buffer.data() + offset, src, first);          // part 1
-  if (n > first)                                                // wrapped?
-    std::memcpy(fq.buffer.data(), src + first, n - first);     // part 2 @ start
+  const auto index = static_cast<std::size_t>(counter & QUEUE_MASK);
+  const std::size_t first = std::min(n, QUEUE_SIZE - index);  // bytes until end
+  std::memcpy(fq.buffer.data() + index, src, first);          // part 1
+  if (n > first)                                               // wrapped?
+    std::memcpy(fq.buffer.data(), src + first, n - first);    // part 2 @ start
 }
 ```
 
-`ring_read` is the mirror image (buffer → destination). `first` is how many
-bytes fit before the physical end; if `n > first` the remainder wraps to offset
-`0`. When a record fits without wrapping, the second `memcpy` is skipped.
+The helpers take the **absolute counter** (`write_counter` / `read_counter`) and
+mask it down to the physical buffer `index` themselves — the caller passes the
+logical counter, not a pre-wrapped position. `ring_read` is the mirror image
+(buffer → destination). `first` is how many bytes fit before the physical end; if
+`n > first` the remainder wraps to index `0`. When a record fits without
+wrapping, the second `memcpy` is skipped.
 
 This split logic applies to **both** the 4-byte header and the payload, so even
 the length prefix itself may straddle the boundary and is handled correctly.
@@ -273,6 +276,9 @@ std::uint64_t read_counter{0};  // last value it observed of the tail
 ### Step 1 — the limit check (back-pressure)
 
 ```cpp
+const auto payload_size = static_cast<header_t>(payload.size());
+const std::size_t record_size = sizeof(header_t) + payload_size;  // header + payload
+
 std::uint64_t bytes_available_to_read = write_counter - read_counter;
 if (bytes_available_to_read + record_size > QUEUE_SIZE) {         // maybe full?
   read_counter = fq.read_counter.load(std::memory_order_acquire); // refresh
@@ -281,6 +287,9 @@ if (bytes_available_to_read + record_size > QUEUE_SIZE) {         // maybe full?
     return false;                                                 // truly full
 }
 ```
+
+`payload_size` (the 4-byte length prefix) is computed once up front and reused
+both for the free-space check here and for framing in Step 2.
 
 This is the core of *"counters checked against the limits."* We only accept the
 write if `bytes_available_to_read + record_size <= QUEUE_SIZE`, i.e. the new record fits
@@ -308,9 +317,8 @@ Two subtleties make this both **fast** and **correct**:
 ### Step 2 — write the framed record
 
 ```cpp
-const auto len = static_cast<header_t>(payload.size());
-ring_write(fq, write_counter,             &len,          sizeof(len)); // header
-ring_write(fq, write_counter + sizeof(len), payload.data(), payload.size());
+ring_write(fq, write_counter, &payload_size, sizeof(payload_size));        // header
+ring_write(fq, write_counter + sizeof(payload_size), payload.data(), payload.size());
 ```
 
 At this point the bytes are in the buffer but **not yet published** — the
@@ -365,10 +373,10 @@ emptiness — it can never step past the producer into unwritten bytes.
 ### Step 2 — read the framed record
 
 ```cpp
-header_t len{};
-ring_read(fq, read_counter, &len, sizeof(len));            // 1. read length
-// assert len fits in `out`
-ring_read(fq, read_counter + sizeof(len), out.data(), len); // 2. read payload
+header_t payload_size{};
+ring_read(fq, read_counter, &payload_size, sizeof(payload_size));   // 1. read length
+// assert payload_size fits in `out`
+ring_read(fq, read_counter + sizeof(payload_size), out.data(), payload_size); // 2. payload
 ```
 
 The header is read first to learn the payload length, then exactly that many
@@ -380,7 +388,7 @@ always present before it is read.
 ### Step 3 — publish the freed space
 
 ```cpp
-read_counter += sizeof(len) + len;                            // advance tail
+read_counter += sizeof(payload_size) + payload_size;          // advance tail
 fq.read_counter.store(read_counter, std::memory_order_release);
 ```
 
@@ -419,6 +427,61 @@ Together these two pairs are sufficient for a correct SPSC queue with no locks
 and no read-modify-write atomics. This was validated by running the test suite
 under **ThreadSanitizer** with zero reported data races.
 
+### What `acquire` and `release` actually do
+
+`release` and `acquire` are **one-way memory barriers** that only constrain
+reordering; they are not locks and never block.
+
+- **`store(v, memory_order_release)`** — a *release* store. It guarantees that
+  **every memory write the thread issued before it (in program order) is
+  completed and visible before this store becomes visible** to another thread.
+  Nothing above it may be reordered below it. Think of it as "publish
+  everything I just wrote, *then* flip this flag."
+
+- **`load(memory_order_acquire)`** — an *acquire* load. The mirror barrier:
+  **nothing after it may be reordered before it**, and if it observes a value
+  written by a release store, then everything that happened before that release
+  store is guaranteed visible afterwards.
+
+The two compose into the guarantee the queue relies on:
+
+> **If the acquire load reads the value the release store wrote, then all writes
+> the producer made before the release are visible to the consumer after the
+> acquire.**
+
+Concretely on the producer side:
+
+```cpp
+ring_write(fq, write_counter, &payload_size, ...);   // (1) header
+ring_write(fq, write_counter + ..., payload.data()); // (2) payload
+fq.write_counter.store(write_counter, release);      // (3) publish
+```
+
+The `release` at (3) forbids (1) and (2) from being reordered after it and
+forces them visible first. So when the consumer's `acquire` load sees the
+advanced `write_counter`, the bytes behind it are guaranteed present — **no torn
+read**. Without the barrier the CPU/compiler would be free to make (3) visible
+before (1)/(2) landed, and the consumer could read uninitialized bytes.
+
+### Why acquire/release and not `relaxed` or `seq_cst`
+
+- **`relaxed`** gives atomicity but **no ordering** — it makes no promise about
+  when the surrounding buffer writes become visible relative to the counter. The
+  reordering bug above would be allowed, so it is *incorrect* for publishing
+  data. (It is fine for the pure statistics counters, e.g. `full_events`, which
+  no other data depends on — those use `relaxed`.)
+
+- **`seq_cst`** (the default) is *also correct* but *stronger than needed*: it
+  additionally imposes a single total order across **all** `seq_cst` operations,
+  which typically compiles to a full memory fence (e.g. `mfence`/`dmb ish`) on
+  the store. That extra global ordering buys nothing here — the queue only needs
+  the pairwise producer↔consumer handshake — and it costs latency on the hot
+  path.
+
+Acquire/release is the **minimal ordering that is still correct**: exactly the
+producer-writes-then-consumer-reads handshake, and nothing more. That is why it
+is the standard idiom for SPSC ring buffers and why this design uses it.
+
 ### Why the earlier design needed completing
 
 The original sketch had *both* counters written by the producer, so the
@@ -436,16 +499,16 @@ the loss-free back-pressure in §4 possible.
 (`1000 & 1023 = 1000`) and we write a 40-byte record (4-byte header + 36-byte
 payload):
 
-- `ring_write` for the header: `offset = 1000`, `first = min(4, 1024-1000=24) = 4`
+- `ring_write` for the header: `index = 1000`, `first = min(4, 1024-1000=24) = 4`
   → header written at bytes `1000..1003`, no wrap.
-- `ring_write` for the payload: `pos = 1004`, `offset = 1004`,
+- `ring_write` for the payload: `counter = 1004`, `index = 1004`,
   `first = min(36, 1024-1004=20) = 20` → 20 bytes at `1004..1023`, then the
   remaining `16` bytes wrap to `0..15`.
 - Head advances to `1040`; next record starts at `1040 & 1023 = 16`.
 
 The consumer, reading from tail `1000`, performs the identical split in
-`ring_read` and reassembles the message contiguously in `out`. The logical
-counters (`1000 → 1040`) never wrap; only their masked *positions* do.
+`ring_read` and reassembles the message contiguously in `out`. The absolute
+counters (`1000 → 1040`) never wrap; only their masked *indices* do.
 
 ---
 
