@@ -279,15 +279,25 @@ inline void test_limits() {
 // verifies that every message arrives exactly once, in order, byte-for-byte -
 // no loss, no duplication, no corruption.
 //
-// Shared driver for the two full-ring benchmarks below. Both busy-spin (no
-// std::this_thread::yield) so what we measure is the queue + contention, never
-// the kernel scheduler. Manual timing brackets only the pump: thread spawn and
-// join are excluded, and so is payload construction (built once, up front).
-template <class Queue>
+// Shared driver for the full-ring benchmarks below. The BusySpin parameter
+// selects the wait strategy: true = busy-spin (HFT default, burns the core),
+// false = std::this_thread::yield() (cooperative, traps into the scheduler).
+// Manual timing brackets only the pump: thread spawn and join are excluded, and
+// so is payload construction (built once, up front).
+template <class Queue, bool BusySpin>
 inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
   // The consumer's scratch buffer is sized to the largest possible message, not
   // to the ring: a 1 MiB ring must never land on the consumer's stack.
   constexpr std::size_t MAX_MSG = 64;
+
+  // The one variable the paired benchmarks compare.
+  auto pause = [] {
+    if constexpr (BusySpin) {
+      spin_pause();
+    } else {
+      std::this_thread::yield();
+    }
+  };
 
   // Variable payload length (8..44 bytes) so records wrap at unaligned offsets,
   // exercising the split-memcpy path in ring_write / ring_read. The first 8
@@ -333,7 +343,7 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
 
     std::thread producer_thread([&] {
       while (!go.load(std::memory_order_acquire)) {
-        spin_pause(); // busy-wait at the gate
+        pause(); // wait at the gate
       }
       std::uint64_t fulls = 0;
       for (std::uint64_t seq = 0; seq < N; ++seq) {
@@ -342,7 +352,7 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
         // queue to full without ever dropping a message.
         while (!prod.try_write(fq, span)) {
           ++fulls;
-          spin_pause();
+          pause();
         }
       }
       full_events.store(fulls, std::memory_order_relaxed);
@@ -352,12 +362,12 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
       std::array<std::byte, MAX_MSG> out{};
       std::uint64_t expected = 0;
       while (!go.load(std::memory_order_acquire)) {
-        spin_pause(); // busy-wait at the gate
+        pause(); // wait at the gate
       }
       while (expected < N) {
         auto n = cons.try_read(fq, out);
         if (!n) {
-          spin_pause();
+          pause();
           continue;
         }
         std::uint64_t seq{};
@@ -399,8 +409,17 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
 // empty most of the time. This isolates the cost of contention / back-pressure.
 inline void test_full_ring_back_pressure(benchmark::State &state) {
   std::println("--- test_full_ring_back_pressure ---");
-  run_full_ring<fast_queue_t<QUEUE_SIZE>>(state, 1'000'000);
+  run_full_ring<fast_queue_t<QUEUE_SIZE>, /*BusySpin=*/true>(state, 1'000'000);
   std::println("test_full_ring_back_pressure PASSED");
+}
+
+// Same small ring, but waits with std::this_thread::yield() instead of a
+// busy-spin - the original strategy. Compare against the busy-spin version to
+// see the cost of trapping into the scheduler under heavy back-pressure.
+inline void test_full_ring_back_pressure_yield(benchmark::State &state) {
+  std::println("--- test_full_ring_back_pressure_yield ---");
+  run_full_ring<fast_queue_t<QUEUE_SIZE>, /*BusySpin=*/false>(state, 1'000'000);
+  std::println("test_full_ring_back_pressure_yield PASSED");
 }
 
 // Large ring: producer and consumer decouple and almost never hit full/empty,
@@ -408,15 +427,26 @@ inline void test_full_ring_back_pressure(benchmark::State &state) {
 // data-movement cost.
 inline void test_full_ring_optimized(benchmark::State &state) {
   std::println("--- test_full_ring_optimized ---");
-  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>>(state, 1'000'000);
+  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/true>(state, 1'000'000);
   std::println("test_full_ring_optimized PASSED");
+}
+
+// Same large ring, waiting with std::this_thread::yield(). With almost no
+// full/empty stalls the wait strategy rarely fires, so this should sit close to
+// the busy-spin version - isolating how much the yield cost depends on contention.
+inline void test_full_ring_optimized_yield(benchmark::State &state) {
+  std::println("--- test_full_ring_optimized_yield ---");
+  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/false>(state, 1'000'000);
+  std::println("test_full_ring_optimized_yield PASSED");
 }
 
 inline void test() {
   test_basic();
   test_limits();
   BENCHMARK(test_full_ring_back_pressure)->UseManualTime()->Iterations(10);
+  BENCHMARK(test_full_ring_back_pressure_yield)->UseManualTime()->Iterations(10);
   BENCHMARK(test_full_ring_optimized)->UseManualTime()->Iterations(10);
+  BENCHMARK(test_full_ring_optimized_yield)->UseManualTime()->Iterations(10);
 
   int argc{0};
   char **argv{nullptr};
