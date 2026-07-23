@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <print>
 #include <span>
@@ -39,6 +40,11 @@ constexpr std::size_t QUEUE_SIZE = 1024;
 constexpr std::uint64_t QUEUE_MASK = QUEUE_SIZE - 1;
 static_assert((QUEUE_SIZE & QUEUE_MASK) == 0, "QUEUE_SIZE must be a power of two");
 
+// A large ring (1 MiB) for the "optimized" benchmark: big enough that producer
+// and consumer decouple and almost never hit full/empty, so back-pressure
+// stalls vanish and throughput reflects the raw data-movement cost.
+constexpr std::size_t LARGE_QUEUE_SIZE = 1u << 20;
+
 // Each message record is: [int32 length][payload bytes].
 using header_t = std::int32_t;
 
@@ -60,17 +66,38 @@ using header_t = std::int32_t;
  * by offset equality), the whole buffer can be used - there is no wasted slot.
  * The physical position of a counter in the buffer is (counter & QUEUE_MASK).
  */
-struct fast_queue {
+template <std::size_t Size>
+struct fast_queue_t {
+  static_assert((Size & (Size - 1)) == 0, "queue size must be a power of two");
+  static constexpr std::size_t SIZE = Size;
+  static constexpr std::uint64_t MASK = Size - 1;
+
   alignas(CACHE_LINE_SIZE) std::atomic<std::uint64_t> read_counter{0};
   alignas(CACHE_LINE_SIZE) std::atomic<std::uint64_t> write_counter{0};
-  alignas(CACHE_LINE_SIZE) std::array<std::byte, QUEUE_SIZE> buffer{};
+  alignas(CACHE_LINE_SIZE) std::array<std::byte, Size> buffer{};
 };
+
+// The default small ring used by the demos and the back-pressure benchmark.
+using fast_queue = fast_queue_t<QUEUE_SIZE>;
+
+// Spin-loop hint for busy-waiting. Tells the core we are in a spin-wait so it
+// can save power and, on SMT cores, cede pipeline resources to the sibling.
+// Far cheaper than std::this_thread::yield(), which traps into the kernel
+// scheduler and typically deschedules the thread.
+inline void spin_pause() noexcept {
+#if defined(__x86_64__) || defined(__i386__)
+  __builtin_ia32_pause();
+#elif defined(__aarch64__) || defined(__arm__)
+  __asm__ __volatile__("yield" ::: "memory");
+#endif
+}
 
 // Copy n bytes into the ring starting at logical(absolute) counter `counter`, wrapping around the
 // physical end of the buffer when necessary (circular write).
-inline void ring_write(fast_queue &fq, std::uint64_t counter, const std::byte *src, std::size_t n) {
-  const auto index = static_cast<std::size_t>(counter & QUEUE_MASK);
-  const std::size_t first = std::min(n, QUEUE_SIZE - index);
+template <class Q>
+inline void ring_write(Q &fq, std::uint64_t counter, const std::byte *src, std::size_t n) {
+  const auto index = static_cast<std::size_t>(counter & Q::MASK);
+  const std::size_t first = std::min(n, Q::SIZE - index);
   std::memcpy(fq.buffer.data() + index, src, first);
   if (n > first) { // the record straddles the end -> continue at the start
     std::memcpy(fq.buffer.data(), src + first, n - first);
@@ -79,9 +106,10 @@ inline void ring_write(fast_queue &fq, std::uint64_t counter, const std::byte *s
 
 // Copy n bytes out of the ring starting at logical(absolute) counter `counter`, wrapping around the
 // physical end of the buffer when necessary (circular read).
-inline void ring_read(const fast_queue &fq, std::uint64_t counter, std::byte *dst, std::size_t n) {
-  const auto index = static_cast<std::size_t>(counter & QUEUE_MASK);
-  const std::size_t first = std::min(n, QUEUE_SIZE - index);
+template <class Q>
+inline void ring_read(const Q &fq, std::uint64_t counter, std::byte *dst, std::size_t n) {
+  const auto index = static_cast<std::size_t>(counter & Q::MASK);
+  const std::size_t first = std::min(n, Q::SIZE - index);
   std::memcpy(dst, fq.buffer.data() + index, first);
   if (n > first) {
     std::memcpy(dst + first, fq.buffer.data(), n - first);
@@ -94,19 +122,20 @@ struct producer {
    * does not have room for the whole record - this is the limit check that
    * gives us back-pressure and guarantees the consumer never loses data.
    */
-  bool try_write(fast_queue &fq, std::span<const std::byte> payload) {
+  template <class Q>
+  bool try_write(Q &fq, std::span<const std::byte> payload) {
     const auto payload_size = static_cast<header_t>(payload.size());
     const std::size_t record_size = sizeof(header_t) + payload_size;
-    assert(record_size <= QUEUE_SIZE && "message larger than the whole queue");
+    assert(record_size <= Q::SIZE && "message larger than the whole queue");
 
     // Check the free space against the limit. First use the cached tail to
     // avoid touching the consumer's cache line on every call; only refresh from
     // the shared counter if that suggests we might be full.
     std::uint64_t bytes_available_to_read = write_counter - read_counter;
-    if (bytes_available_to_read + record_size > QUEUE_SIZE) {
+    if (bytes_available_to_read + record_size > Q::SIZE) {
       read_counter = fq.read_counter.load(std::memory_order_acquire);
       bytes_available_to_read = write_counter - read_counter;
-      if (bytes_available_to_read + record_size > QUEUE_SIZE) {
+      if (bytes_available_to_read + record_size > Q::SIZE) {
         return false; // genuinely full
       }
     }
@@ -134,7 +163,8 @@ struct consumer {
    * Try to read one message into `out`. Returns the number of payload bytes
    * read, or std::nullopt when the queue is empty.
    */
-  std::optional<std::size_t> try_read(fast_queue &fq, std::span<std::byte> out) {
+  template <class Q>
+  std::optional<std::size_t> try_read(Q &fq, std::span<std::byte> out) {
     // Empty check. Use the cached head first, refresh only when it looks empty.
     if (read_counter == write_counter) {
       write_counter = fq.write_counter.load(std::memory_order_acquire);
@@ -245,13 +275,19 @@ inline void test_limits() {
 }
 
 // --- Demo 3: full end-to-end stress -------------------------------------
-// Two threads pump N variable-sized messages through the small ring. Because
-// the ring is tiny relative to N, it fills up and wraps around tens of
-// thousands of times. The consumer verifies that every message arrives exactly
-// once, in order, byte-for-byte - i.e. no loss, no duplication, no corruption.
-inline void test_full_ring(benchmark::State &state) {
-  std::println("--- test_full_ring ---");
-  constexpr std::uint64_t N = 1'000'000;
+// Two threads pump N variable-sized messages through a Queue ring. The consumer
+// verifies that every message arrives exactly once, in order, byte-for-byte -
+// no loss, no duplication, no corruption.
+//
+// Shared driver for the two full-ring benchmarks below. Both busy-spin (no
+// std::this_thread::yield) so what we measure is the queue + contention, never
+// the kernel scheduler. Manual timing brackets only the pump: thread spawn and
+// join are excluded, and so is payload construction (built once, up front).
+template <class Queue>
+inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
+  // The consumer's scratch buffer is sized to the largest possible message, not
+  // to the ring: a 1 MiB ring must never land on the consumer's stack.
+  constexpr std::size_t MAX_MSG = 64;
 
   // Variable payload length (8..44 bytes) so records wrap at unaligned offsets,
   // exercising the split-memcpy path in ring_write / ring_read. The first 8
@@ -280,7 +316,10 @@ inline void test_full_ring(benchmark::State &state) {
 
   for (auto _ : state) {
     // Fresh queue per iteration so every iteration pumps exactly N messages.
-    fast_queue fq;
+    // Heap-allocated because a large ring won't fit on the stack; the allocation
+    // happens before timing starts, so it is not measured.
+    auto fq_ptr = std::make_unique<Queue>();
+    Queue &fq = *fq_ptr;
     producer prod;
     consumer cons;
 
@@ -294,31 +333,31 @@ inline void test_full_ring(benchmark::State &state) {
 
     std::thread producer_thread([&] {
       while (!go.load(std::memory_order_acquire)) {
-        // park at the gate
+        spin_pause(); // busy-wait at the gate
       }
       std::uint64_t fulls = 0;
       for (std::uint64_t seq = 0; seq < N; ++seq) {
         std::span<const std::byte> span{payloads[seq]};
-        // Back-pressure: spin until there is room. This is what drives the queue
-        // to full without ever dropping a message.
+        // Back-pressure: busy-spin until there is room. This is what drives the
+        // queue to full without ever dropping a message.
         while (!prod.try_write(fq, span)) {
           ++fulls;
-          std::this_thread::yield();
+          spin_pause();
         }
       }
       full_events.store(fulls, std::memory_order_relaxed);
     });
 
     std::thread consumer_thread([&] {
-      std::array<std::byte, QUEUE_SIZE> out{};
+      std::array<std::byte, MAX_MSG> out{};
       std::uint64_t expected = 0;
       while (!go.load(std::memory_order_acquire)) {
-        // park at the gate
+        spin_pause(); // busy-wait at the gate
       }
       while (expected < N) {
         auto n = cons.try_read(fq, out);
         if (!n) {
-          std::this_thread::yield();
+          spin_pause();
           continue;
         }
         std::uint64_t seq{};
@@ -353,16 +392,31 @@ inline void test_full_ring(benchmark::State &state) {
   state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(N));
 
   std::println("delivered {} messages/iteration in order, byte-for-byte, no loss", N);
-  std::println("producer hit a full queue {} times on the last iteration "
-               "(back-pressure exercised)",
-               last_fulls);
-  std::println("test_full_ring PASSED");
+  std::println("producer hit a full queue {} times on the last iteration", last_fulls);
+}
+
+// Small ring: producer and consumer collide constantly, so the ring is full or
+// empty most of the time. This isolates the cost of contention / back-pressure.
+inline void test_full_ring_back_pressure(benchmark::State &state) {
+  std::println("--- test_full_ring_back_pressure ---");
+  run_full_ring<fast_queue_t<QUEUE_SIZE>>(state, 1'000'000);
+  std::println("test_full_ring_back_pressure PASSED");
+}
+
+// Large ring: producer and consumer decouple and almost never hit full/empty,
+// so the back-pressure stalls vanish and throughput reflects the queue's raw
+// data-movement cost.
+inline void test_full_ring_optimized(benchmark::State &state) {
+  std::println("--- test_full_ring_optimized ---");
+  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>>(state, 1'000'000);
+  std::println("test_full_ring_optimized PASSED");
 }
 
 inline void test() {
   test_basic();
   test_limits();
-  BENCHMARK(test_full_ring)->UseManualTime()->Iterations(10);
+  BENCHMARK(test_full_ring_back_pressure)->UseManualTime()->Iterations(10);
+  BENCHMARK(test_full_ring_optimized)->UseManualTime()->Iterations(10);
 
   int argc{0};
   char **argv{nullptr};
