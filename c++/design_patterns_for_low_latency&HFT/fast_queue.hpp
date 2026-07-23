@@ -253,10 +253,6 @@ inline void test_full_ring(benchmark::State &state) {
   std::println("--- test_full_ring ---");
   constexpr std::uint64_t N = 1'000'000;
 
-  fast_queue fq;
-  producer prod;
-  consumer cons;
-
   // Variable payload length (8..44 bytes) so records wrap at unaligned offsets,
   // exercising the split-memcpy path in ring_write / ring_read. The first 8
   // bytes carry the sequence number; the rest is a deterministic filler derived
@@ -271,14 +267,38 @@ inline void test_full_ring(benchmark::State &state) {
     return p;
   };
 
-  std::atomic<std::uint64_t> full_events{0};
+  // Pre-build every payload once, outside the timed region, so neither the
+  // allocation nor the filler generation is charged to try_write - we want to
+  // measure the queue's try_write/try_read cost only.
+  std::vector<std::vector<std::byte>> payloads;
+  payloads.reserve(N);
+  for (std::uint64_t seq = 0; seq < N; ++seq) {
+    payloads.push_back(make_payload(seq));
+  }
+
+  std::uint64_t last_fulls = 0;
 
   for (auto _ : state) {
+    // Fresh queue per iteration so every iteration pumps exactly N messages.
+    fast_queue fq;
+    producer prod;
+    consumer cons;
+
+    // Start-gate: spawn both threads first, then release them together. This
+    // lets us start the clock *after* thread creation so spawn cost is excluded.
+    std::atomic<bool> go{false};
+    std::atomic<std::uint64_t> full_events{0};
+    // Stamped by the consumer the instant it delivers the last message - before
+    // any join - so thread teardown is excluded from the measurement too.
+    std::chrono::steady_clock::time_point t_end;
+
     std::thread producer_thread([&] {
+      while (!go.load(std::memory_order_acquire)) {
+        // park at the gate
+      }
       std::uint64_t fulls = 0;
       for (std::uint64_t seq = 0; seq < N; ++seq) {
-        const auto payload = make_payload(seq);
-        std::span<const std::byte> span{payload};
+        std::span<const std::byte> span{payloads[seq]};
         // Back-pressure: spin until there is room. This is what drives the queue
         // to full without ever dropping a message.
         while (!prod.try_write(fq, span)) {
@@ -292,6 +312,9 @@ inline void test_full_ring(benchmark::State &state) {
     std::thread consumer_thread([&] {
       std::array<std::byte, QUEUE_SIZE> out{};
       std::uint64_t expected = 0;
+      while (!go.load(std::memory_order_acquire)) {
+        // park at the gate
+      }
       while (expected < N) {
         auto n = cons.try_read(fq, out);
         if (!n) {
@@ -311,22 +334,35 @@ inline void test_full_ring(benchmark::State &state) {
         ++expected;
       }
       assert(expected == N);
+      t_end = std::chrono::steady_clock::now();
     });
+
+    // Threads exist and are parked at the gate. Start timing, then release them.
+    const auto t_begin = std::chrono::steady_clock::now();
+    go.store(true, std::memory_order_release);
 
     producer_thread.join();
     consumer_thread.join();
+    // t_end was captured just before these joins, so join/teardown is excluded.
+    // The joins also establish happens-before, so reading t_end here is safe.
+
+    state.SetIterationTime(std::chrono::duration<double>(t_end - t_begin).count());
+    last_fulls = full_events.load(std::memory_order_relaxed);
   }
 
-  std::println("delivered {} messages in order, byte-for-byte, no loss", N);
-  std::println("producer hit a full queue {} times (back-pressure exercised)",
-               full_events.load(std::memory_order_relaxed));
+  state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(N));
+
+  std::println("delivered {} messages/iteration in order, byte-for-byte, no loss", N);
+  std::println("producer hit a full queue {} times on the last iteration "
+               "(back-pressure exercised)",
+               last_fulls);
   std::println("test_full_ring PASSED");
 }
 
 inline void test() {
   // test_basic();
   // test_limits();
-  BENCHMARK(test_full_ring);
+  BENCHMARK(test_full_ring)->UseManualTime()->Iterations(10);
 
   int argc{0};
   char **argv{nullptr};
