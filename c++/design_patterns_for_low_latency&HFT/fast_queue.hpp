@@ -18,6 +18,8 @@
 #include <thread>
 #include <vector>
 
+#include <benchmark/benchmark.h>
+
 #if defined(__cpp_lib_hardware_interference_size)
 #include <new>
 inline constexpr std::size_t CACHE_LINE_SIZE = std::hardware_destructive_interference_size;
@@ -247,7 +249,7 @@ inline void test_limits() {
 // the ring is tiny relative to N, it fills up and wraps around tens of
 // thousands of times. The consumer verifies that every message arrives exactly
 // once, in order, byte-for-byte - i.e. no loss, no duplication, no corruption.
-inline void test_full_ring() {
+inline void test_full_ring(benchmark::State &state) {
   std::println("--- test_full_ring ---");
   constexpr std::uint64_t N = 1'000'000;
 
@@ -271,47 +273,49 @@ inline void test_full_ring() {
 
   std::atomic<std::uint64_t> full_events{0};
 
-  std::thread producer_thread([&] {
-    std::uint64_t fulls = 0;
-    for (std::uint64_t seq = 0; seq < N; ++seq) {
-      const auto payload = make_payload(seq);
-      std::span<const std::byte> span{payload};
-      // Back-pressure: spin until there is room. This is what drives the queue
-      // to full without ever dropping a message.
-      while (!prod.try_write(fq, span)) {
-        ++fulls;
-        std::this_thread::yield();
+  for (auto _ : state) {
+    std::thread producer_thread([&] {
+      std::uint64_t fulls = 0;
+      for (std::uint64_t seq = 0; seq < N; ++seq) {
+        const auto payload = make_payload(seq);
+        std::span<const std::byte> span{payload};
+        // Back-pressure: spin until there is room. This is what drives the queue
+        // to full without ever dropping a message.
+        while (!prod.try_write(fq, span)) {
+          ++fulls;
+          std::this_thread::yield();
+        }
       }
-    }
-    full_events.store(fulls, std::memory_order_relaxed);
-  });
+      full_events.store(fulls, std::memory_order_relaxed);
+    });
 
-  std::thread consumer_thread([&] {
-    std::array<std::byte, QUEUE_SIZE> out{};
-    std::uint64_t expected = 0;
-    while (expected < N) {
-      auto n = cons.try_read(fq, out);
-      if (!n) {
-        std::this_thread::yield();
-        continue;
+    std::thread consumer_thread([&] {
+      std::array<std::byte, QUEUE_SIZE> out{};
+      std::uint64_t expected = 0;
+      while (expected < N) {
+        auto n = cons.try_read(fq, out);
+        if (!n) {
+          std::this_thread::yield();
+          continue;
+        }
+        std::uint64_t seq{};
+        assert(*n >= sizeof(seq));
+        std::memcpy(&seq, out.data(), sizeof(seq));
+        assert(seq == expected && "out of order or lost message");
+
+        const std::size_t extra = *n - sizeof(seq);
+        for (std::size_t i = 0; i < extra; ++i) {
+          assert(out[sizeof(seq) + i] == static_cast<std::byte>((seq + i) & 0xFF) &&
+                 "payload corrupted");
+        }
+        ++expected;
       }
-      std::uint64_t seq{};
-      assert(*n >= sizeof(seq));
-      std::memcpy(&seq, out.data(), sizeof(seq));
-      assert(seq == expected && "out of order or lost message");
+      assert(expected == N);
+    });
 
-      const std::size_t extra = *n - sizeof(seq);
-      for (std::size_t i = 0; i < extra; ++i) {
-        assert(out[sizeof(seq) + i] == static_cast<std::byte>((seq + i) & 0xFF) &&
-               "payload corrupted");
-      }
-      ++expected;
-    }
-    assert(expected == N);
-  });
-
-  producer_thread.join();
-  consumer_thread.join();
+    producer_thread.join();
+    consumer_thread.join();
+  }
 
   std::println("delivered {} messages in order, byte-for-byte, no loss", N);
   std::println("producer hit a full queue {} times (back-pressure exercised)",
@@ -320,8 +324,14 @@ inline void test_full_ring() {
 }
 
 inline void test() {
-  test_basic();
-  test_limits();
-  test_full_ring();
+  // test_basic();
+  // test_limits();
+  BENCHMARK(test_full_ring);
+
+  int argc{0};
+  char **argv{nullptr};
+  benchmark::Initialize(&argc, argv);
+  benchmark::RunSpecifiedBenchmarks();
+  benchmark::Shutdown();
 }
 } // namespace fast_queue
