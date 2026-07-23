@@ -360,8 +360,8 @@ inline void test_full_ring(benchmark::State &state) {
 }
 
 inline void test() {
-  // test_basic();
-  // test_limits();
+  test_basic();
+  test_limits();
   BENCHMARK(test_full_ring)->UseManualTime()->Iterations(10);
 
   int argc{0};
