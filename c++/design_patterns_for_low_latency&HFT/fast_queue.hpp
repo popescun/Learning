@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <print>
@@ -440,6 +441,128 @@ inline void test_full_ring_optimized_yield(benchmark::State &state) {
   std::println("test_full_ring_optimized_yield PASSED");
 }
 
+// --- Demo 4: end-to-end latency under a realistic arrival rate -----------
+// Models an HFT feed: messages arrive at a target rate (msgs/sec) with real gaps
+// between them - nobody sleeps. The producer BUSY-WAITS on the clock until the
+// next scheduled send (like a feed handler busy-polling the NIC), and the
+// consumer busy-polls the queue. Each message carries its publish timestamp, so
+// the consumer measures true end-to-end delivery latency. The BusySpin flag
+// selects the consumer's queue-wait strategy (busy-spin vs yield) so we can see
+// how much a descheduled consumer costs during the idle gaps between messages.
+struct latency_msg { // trivially copyable so to_bytes/from_bytes work
+  std::uint64_t seq;
+  std::int64_t t_send_ns;
+};
+
+template <bool BusySpin>
+inline void run_latency(benchmark::State &state) {
+  const auto rate = static_cast<std::uint64_t>(state.range(0)); // messages / second
+  constexpr std::uint64_t N = 50'000;                           // samples per iteration
+  constexpr std::size_t MAX_MSG = 64;
+
+  using clock = std::chrono::steady_clock;
+  const auto period = std::chrono::nanoseconds(
+      rate == 0 ? 0 : static_cast<std::int64_t>(1'000'000'000ULL / rate));
+  auto now_ns = [] {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now().time_since_epoch())
+        .count();
+  };
+
+  std::int64_t sum_ns = 0;
+  std::int64_t min_ns = std::numeric_limits<std::int64_t>::max();
+  std::int64_t max_ns = 0;
+  std::uint64_t samples = 0;
+
+  for (auto _ : state) {
+    auto fq_ptr = std::make_unique<fast_queue>();
+    fast_queue &fq = *fq_ptr;
+    producer prod;
+    consumer cons;
+    std::atomic<bool> go{false};
+
+    // Consumer-side accumulators, published to the loop after the join.
+    std::int64_t c_sum = 0;
+    std::int64_t c_min = std::numeric_limits<std::int64_t>::max();
+    std::int64_t c_max = 0;
+
+    std::thread consumer_thread([&] {
+      std::array<std::byte, MAX_MSG> out{};
+      std::uint64_t got = 0;
+      while (!go.load(std::memory_order_acquire)) {
+        spin_pause();
+      }
+      while (got < N) {
+        auto n = cons.try_read(fq, out);
+        if (!n) {
+          if constexpr (BusySpin) {
+            spin_pause(); // stay hot: notice the next message in ~tens of ns
+          } else {
+            std::this_thread::yield(); // give up the core: risks a reschedule delay
+          }
+          continue;
+        }
+        const std::int64_t recv = now_ns(); // stamp arrival as early as possible
+        const auto m = from_bytes<latency_msg>(std::span<const std::byte>{out.data(), *n});
+        const std::int64_t lat = recv - m.t_send_ns;
+        c_sum += lat;
+        c_min = std::min(c_min, lat);
+        c_max = std::max(c_max, lat);
+        ++got;
+      }
+    });
+
+    std::thread producer_thread([&] {
+      while (!go.load(std::memory_order_acquire)) {
+        spin_pause();
+      }
+      const auto t0 = clock::now();
+      for (std::uint64_t seq = 0; seq < N; ++seq) {
+        // Busy-wait (never sleep) until this message's scheduled send time.
+        const auto target = t0 + period * static_cast<std::int64_t>(seq);
+        while (clock::now() < target) {
+          spin_pause();
+        }
+        const latency_msg m{seq, now_ns()}; // stamp send as late as possible
+        const auto bytes = to_bytes(m);
+        while (!prod.try_write(fq, std::span<const std::byte>{bytes})) {
+          spin_pause();
+        }
+      }
+    });
+
+    go.store(true, std::memory_order_release);
+    producer_thread.join();
+    consumer_thread.join();
+
+    sum_ns += c_sum;
+    min_ns = std::min(min_ns, c_min);
+    max_ns = std::max(max_ns, c_max);
+    samples += N;
+  }
+
+  const double avg_ns =
+      samples ? static_cast<double>(sum_ns) / static_cast<double>(samples) : 0.0;
+  state.counters["avg_ns"] = avg_ns;
+  state.counters["min_ns"] = static_cast<double>(min_ns);
+  state.counters["max_ns"] = static_cast<double>(max_ns);
+
+  std::println("rate {} msg/s | avg {:.0f} ns | min {} ns | max {} ns | samples {}", rate, avg_ns,
+               min_ns, max_ns, samples);
+}
+
+// Consumer busy-spins on an empty queue - the HFT production strategy.
+inline void test_latency(benchmark::State &state) {
+  std::println("--- test_latency (busy-spin) ---");
+  run_latency</*BusySpin=*/true>(state);
+}
+
+// Consumer yields on an empty queue - watch the tail (max) blow up as the gaps
+// let the OS deschedule it between messages.
+inline void test_latency_yield(benchmark::State &state) {
+  std::println("--- test_latency (yield) ---");
+  run_latency</*BusySpin=*/false>(state);
+}
+
 inline void test() {
   test_basic();
   test_limits();
@@ -447,6 +570,9 @@ inline void test() {
   BENCHMARK(test_full_ring_back_pressure_yield)->UseManualTime()->Iterations(10);
   BENCHMARK(test_full_ring_optimized)->UseManualTime()->Iterations(10);
   BENCHMARK(test_full_ring_optimized_yield)->UseManualTime()->Iterations(10);
+  // Sweep a couple of representative arrival rates (msgs/sec).
+  BENCHMARK(test_latency)->UseRealTime()->Iterations(3)->Arg(100'000)->Arg(1'000'000);
+  BENCHMARK(test_latency_yield)->UseRealTime()->Iterations(3)->Arg(100'000)->Arg(1'000'000);
 
   int argc{0};
   char **argv{nullptr};
