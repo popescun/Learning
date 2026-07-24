@@ -1,7 +1,7 @@
 //
 // Created by Nicolae Popescu on 28/10/2025.
 //
-// Tests and benchmarks for fast_queue.hpp. Kept out of the implementation header
+// Tests and benchmarks for fast_queue_SPSC.hpp. Kept out of the implementation header
 // so the queue itself reads as a clean, self-contained component. Reopens the
 // fast_queue namespace so the demos reference producer/consumer/etc. unqualified,
 // exactly as before the split.
@@ -9,7 +9,7 @@
 
 #pragma once
 
-#include "fast_queue.hpp"
+#include "fast_queue_SPSC.hpp"
 
 #include <algorithm>
 #include <array>
@@ -138,27 +138,35 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
     }
   };
 
-  // Variable payload length (8..44 bytes) so records wrap at unaligned offsets,
-  // exercising the split-memcpy path in ring_write / ring_read. The first 8
-  // bytes carry the sequence number; the rest is a deterministic filler derived
-  // from the sequence number so the consumer can validate the content too.
-  auto make_payload = [](std::uint64_t seq) {
-    const std::size_t extra = static_cast<std::size_t>(seq % 37);
-    std::vector<std::byte> p(sizeof(std::uint64_t) + extra);
-    std::memcpy(p.data(), &seq, sizeof(seq));
-    for (std::size_t i = 0; i < extra; ++i) {
-      p[sizeof(seq) + i] = static_cast<std::byte>((seq + i) & 0xFF);
-    }
-    return p;
-  };
+  // A small, power-of-two POOL of pre-built payloads the producer cycles through
+  // (indexed by seq & POOL_MASK). Building them once, outside the timed region, keeps
+  // allocation and filler generation off the hot path - as the old "pre-build all N"
+  // approach did - but memory is O(POOL), not O(N), so arbitrarily large N no longer
+  // exhausts RAM. It also decouples the producer's payload-source working set from N,
+  // so throughput is comparable across message counts (a large-N run no longer streams
+  // a bigger source array than a small one). POOL is sized to sit in L2, so the payload
+  // source stays cache-hot - this measures the queue path, not payload-fetch cost.
+  //
+  // Payload length varies with the pool index (8..44 bytes) so records still wrap at
+  // unaligned offsets and exercise the split-memcpy path. The filler is a deterministic,
+  // seq-INDEPENDENT pattern derived from the payload length, so the consumer can validate
+  // byte integrity without knowing which pool slot was used. Per-message identity (order /
+  // no-loss) is carried by the true sequence number, which the producer stamps into the
+  // first 8 bytes just before each send.
+  constexpr std::uint64_t POOL = 8192; // power of two; O(POOL) memory regardless of N
+  static_assert((POOL & (POOL - 1)) == 0, "POOL must be a power of two");
+  constexpr std::uint64_t POOL_MASK = POOL - 1;
 
-  // Pre-build every payload once, outside the timed region, so neither the
-  // allocation nor the filler generation is charged to try_write - we want to
-  // measure the queue's try_write/try_read cost only.
-  std::vector<std::vector<std::byte>> payloads;
-  payloads.reserve(N);
-  for (std::uint64_t seq = 0; seq < N; ++seq) {
-    payloads.push_back(make_payload(seq));
+  std::vector<std::vector<std::byte>> pool;
+  pool.reserve(POOL);
+  for (std::uint64_t j = 0; j < POOL; ++j) {
+    const std::size_t extra = static_cast<std::size_t>(j % 37);
+    std::vector<std::byte> p(sizeof(std::uint64_t) + extra);
+    // First 8 bytes are a placeholder for the per-send sequence number (stamped below).
+    for (std::size_t i = 0; i < extra; ++i) {
+      p[sizeof(std::uint64_t) + i] = static_cast<std::byte>((extra + i) & 0xFF);
+    }
+    pool.push_back(std::move(p));
   }
 
   std::uint64_t last_fulls = 0;
@@ -186,7 +194,13 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
       }
       std::uint64_t fulls = 0;
       for (std::uint64_t seq = 0; seq < N; ++seq) {
-        std::span<const std::byte> span{payloads[seq]};
+        // Reuse a pooled buffer and stamp the true sequence number into its first
+        // 8 bytes - the only per-message write on the hot path (~one 8-byte store,
+        // like a real feed stamping a seq). try_write copies the bytes into the ring
+        // before returning, so re-stamping the shared buffer next iteration is safe.
+        auto &buf = pool[seq & POOL_MASK];
+        std::memcpy(buf.data(), &seq, sizeof(seq));
+        std::span<const std::byte> span{buf};
         // Back-pressure: busy-spin until there is room. This is what drives the
         // queue to full without ever dropping a message.
         while (!prod.try_write(fq, span)) {
@@ -216,7 +230,7 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
 
         const std::size_t extra = *n - sizeof(seq);
         for (std::size_t i = 0; i < extra; ++i) {
-          assert(out[sizeof(seq) + i] == static_cast<std::byte>((seq + i) & 0xFF) &&
+          assert(out[sizeof(seq) + i] == static_cast<std::byte>((extra + i) & 0xFF) &&
                  "payload corrupted");
         }
         ++expected;
@@ -248,7 +262,7 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
 // empty most of the time. This isolates the cost of contention / back-pressure.
 inline void test_full_ring_back_pressure(benchmark::State &state) {
   std::println("--- test_full_ring_back_pressure ---");
-  run_full_ring<fast_queue_t<QUEUE_SIZE>, /*BusySpin=*/true>(state, 1'000'000);
+  run_full_ring<fast_queue_t<QUEUE_SIZE>, /*BusySpin=*/true>(state, 1'000'000'000);
   std::println("test_full_ring_back_pressure PASSED");
 }
 
@@ -257,7 +271,7 @@ inline void test_full_ring_back_pressure(benchmark::State &state) {
 // see the cost of trapping into the scheduler under heavy back-pressure.
 inline void test_full_ring_back_pressure_yield(benchmark::State &state) {
   std::println("--- test_full_ring_back_pressure_yield ---");
-  run_full_ring<fast_queue_t<QUEUE_SIZE>, /*BusySpin=*/false>(state, 1'000'000);
+  run_full_ring<fast_queue_t<QUEUE_SIZE>, /*BusySpin=*/false>(state, 1'000'000'000);
   std::println("test_full_ring_back_pressure_yield PASSED");
 }
 
@@ -266,7 +280,7 @@ inline void test_full_ring_back_pressure_yield(benchmark::State &state) {
 // data-movement cost.
 inline void test_full_ring_optimized(benchmark::State &state) {
   std::println("--- test_full_ring_optimized ---");
-  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/true>(state, 1'000'000);
+  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/true>(state, 1'000'000'000);
   std::println("test_full_ring_optimized PASSED");
 }
 
@@ -275,7 +289,7 @@ inline void test_full_ring_optimized(benchmark::State &state) {
 // the busy-spin version - isolating how much the yield cost depends on contention.
 inline void test_full_ring_optimized_yield(benchmark::State &state) {
   std::println("--- test_full_ring_optimized_yield ---");
-  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/false>(state, 1'000'000);
+  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/false>(state, 1'000'000'000);
   std::println("test_full_ring_optimized_yield PASSED");
 }
 
@@ -316,6 +330,17 @@ inline void run_latency(benchmark::State &state) {
   // actually characterize HFT latency (you get picked off on your worst cases).
   std::vector<std::int64_t> all_lat;
   all_lat.reserve(static_cast<std::size_t>(N) * static_cast<std::size_t>(state.max_iterations));
+
+  // Same pooled-buffer + in-place-stamp send mechanism as run_full_ring: a power-of-two
+  // pool of reusable buffers, built once outside the timed region so allocation is never
+  // on the hot path. latency_msg is fixed size, so each slot is sizeof(latency_msg) and
+  // is fully (re)stamped on each send - here the whole message is dynamic (seq + a fresh
+  // timestamp), which is the one thing that cannot be pre-built. The pool keeps the way a
+  // message is prepared and sent identical across all benchmarks.
+  constexpr std::uint64_t POOL = 8192;
+  static_assert((POOL & (POOL - 1)) == 0, "POOL must be a power of two");
+  constexpr std::uint64_t POOL_MASK = POOL - 1;
+  std::vector<std::array<std::byte, sizeof(latency_msg)>> pool(POOL);
 
   for (auto _ : state) {
     auto fq_ptr = std::make_unique<fast_queue>();
@@ -369,9 +394,12 @@ inline void run_latency(benchmark::State &state) {
         while (clock::now() < target) {
           spin_pause();
         }
+        // Reuse a pooled buffer and stamp the whole message (seq + timestamp) in place,
+        // as late as possible, then send - the same mechanism the full-ring producer uses.
+        auto &buf = pool[seq & POOL_MASK];
         const latency_msg m{seq, now_ns()}; // stamp send as late as possible
-        const auto bytes = to_bytes(m);
-        while (!prod.try_write(fq, std::span<const std::byte>{bytes})) {
+        std::memcpy(buf.data(), &m, sizeof(m));
+        while (!prod.try_write(fq, std::span<const std::byte>{buf})) {
           spin_pause();
         }
       }
@@ -435,13 +463,13 @@ inline void test_latency_yield(benchmark::State &state) {
 inline void test() {
   test_basic();
   test_limits();
-  BENCHMARK(test_full_ring_back_pressure)->UseManualTime()->Iterations(10);
-  BENCHMARK(test_full_ring_back_pressure_yield)->UseManualTime()->Iterations(10);
-  BENCHMARK(test_full_ring_optimized)->UseManualTime()->Iterations(10);
-  BENCHMARK(test_full_ring_optimized_yield)->UseManualTime()->Iterations(10);
+  BENCHMARK(test_full_ring_back_pressure)->UseManualTime()->Iterations(1);
+  BENCHMARK(test_full_ring_back_pressure_yield)->UseManualTime()->Iterations(1);
+  BENCHMARK(test_full_ring_optimized)->UseManualTime()->Iterations(1);
+  BENCHMARK(test_full_ring_optimized_yield)->UseManualTime()->Iterations(1);
   // Sweep a couple of representative arrival rates (msgs/sec).
-  BENCHMARK(test_latency)->UseRealTime()->Iterations(3)->Arg(100'000)->Arg(1'000'000);
-  BENCHMARK(test_latency_yield)->UseRealTime()->Iterations(3)->Arg(100'000)->Arg(1'000'000);
+  BENCHMARK(test_latency)->UseRealTime()->Iterations(1)->Arg(100'000)->Arg(1'000'000'000);
+  BENCHMARK(test_latency_yield)->UseRealTime()->Iterations(1)->Arg(100'000)->Arg(1'000'000'000);
 
   int argc{0};
   char **argv{nullptr};

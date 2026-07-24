@@ -1,6 +1,6 @@
 #include "cache_warming.hpp"
 #include "compile_time_dispatch.hpp"
-#include "fast_queue_test.hpp"
+#include "fast_queue_SPSC_test.hpp"
 
 int main() {
   // cache_warming::test();

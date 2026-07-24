@@ -1,6 +1,6 @@
 # Fast Queue — a lock-free SPSC ring buffer
 
-`fast_queue.hpp` implements a **single-producer / single-consumer (SPSC)**,
+`fast_queue_SPSC.hpp` implements a **single-producer / single-consumer (SPSC)**,
 lock-free, byte-oriented **ring buffer** designed for low-latency / HFT-style
 message passing between two threads (e.g. a market-data feed thread and a
 strategy thread).
@@ -17,10 +17,14 @@ as a clean, self-contained component:
 
 | File | Contents |
 |------|----------|
-| `fast_queue.hpp` | **Implementation only** — the ring buffer, `producer`, `consumer`, the `ring_write`/`ring_read` helpers, and `spin_pause`. |
-| `fast_queue_test.hpp` | **Tests & benchmarks** — the demos, the `to_bytes`/`from_bytes` serialization helpers, the demo POD types (`Quote`, `latency_msg`), and the `fast_queue::test()` entry point. Reopens `namespace fast_queue`. |
+| `fast_queue_SPSC.hpp` | **Implementation only** — the ring buffer, `producer`, `consumer`, the `ring_write`/`ring_read` helpers, and `spin_pause`. |
+| `fast_queue_SPSC_test.hpp` | **Tests & benchmarks** — the demos, the `to_bytes`/`from_bytes` serialization helpers, the demo POD types (`Quote`, `latency_msg`), and the `fast_queue::test()` entry point. Reopens `namespace fast_queue`. |
 
-`main.cpp` includes `fast_queue_test.hpp` and calls `fast_queue::test()`.
+`main.cpp` includes `fast_queue_SPSC_test.hpp` and calls `fast_queue::test()`.
+
+> A separate **multi-consumer (SPMC) broadcast** variant is sketched in
+> `fast_queue_SPMC.hpp` — one shared buffer, per-consumer read counters, every
+> consumer sees every message. See that file's header comment for the design.
 
 The ring is **parameterized on its capacity** — `fast_queue_t<Size>` — so the same
 code serves both a tiny 1 KB ring (to force wraps and back-pressure in tests) and
@@ -554,7 +558,7 @@ counters (`1000 → 1040`) never wrap; only their masked *indices* do.
 
 ## 8. The test suite (`fast_queue::test()`)
 
-All tests and benchmarks live in `fast_queue_test.hpp` (see *Source layout*
+All tests and benchmarks live in `fast_queue_SPSC_test.hpp` (see *Source layout*
 above) and run from `fast_queue::test()`. There are two correctness demos and two
 benchmark families. Throughput benchmarks use [Google Benchmark]; the wait
 strategy is a compile-time flag (`BusySpin`) so each benchmark exists in a
@@ -715,4 +719,4 @@ cmake --build build_release
 - Payloads are raw bytes. The queue itself only moves bytes; the `to_bytes` /
   `from_bytes` helpers (which require trivially copyable types) used to
   (de)serialize structs like `Quote` are **test-side conveniences** and live in
-  `fast_queue_test.hpp`, not in the implementation header.
+  `fast_queue_SPSC_test.hpp`, not in the implementation header.
