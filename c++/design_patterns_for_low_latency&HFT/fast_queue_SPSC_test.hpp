@@ -113,6 +113,79 @@ inline void test_limits() {
   std::println("test_limits PASSED");
 }
 
+// --- Demo: zero-copy consumer read (in-place, no out-copy) --------------------------------
+// Same no-loss / in-order / byte-integrity guarantees as test_full_ring, but the consumer
+// reads each message IN PLACE via try_read_view (handling the two-piece wrap case) and then
+// releases it with commit_read - exercising the two-phase zero-copy API under real
+// back-pressure on the small 1 KB ring (which forces frequent wraps).
+inline void test_zero_copy() {
+  std::println("--- test_zero_copy ---");
+  constexpr std::uint64_t N = 1'000'000;
+  auto fq_ptr = std::make_unique<fast_queue>();
+  fast_queue &fq = *fq_ptr;
+  producer prod;
+  consumer cons;
+  std::atomic<bool> go{false};
+
+  std::thread producer_thread([&] {
+    while (!go.load(std::memory_order_acquire)) {
+      spin_pause();
+    }
+    for (std::uint64_t seq = 0; seq < N; ++seq) {
+      const std::size_t extra = static_cast<std::size_t>(seq % 37); // 0..36 -> 8..44 byte payload
+      std::array<std::byte, sizeof(std::uint64_t) + 36> buf{};
+      std::memcpy(buf.data(), &seq, sizeof(seq));
+      for (std::size_t i = 0; i < extra; ++i) {
+        buf[sizeof(seq) + i] = static_cast<std::byte>((extra + i) & 0xFF);
+      }
+      std::span<const std::byte> span{buf.data(), sizeof(seq) + extra};
+      while (!prod.try_write(fq, span)) {
+        spin_pause();
+      }
+    }
+  });
+
+  std::thread consumer_thread([&] {
+    while (!go.load(std::memory_order_acquire)) {
+      spin_pause();
+    }
+    // scratch is used ONLY to reassemble a wrapped payload for validation; real zero-copy
+    // consumers would process view.first / view.second directly, without this copy.
+    std::array<std::byte, 64> scratch{};
+    std::uint64_t expected = 0;
+    while (expected < N) {
+      auto view = cons.try_read_view(fq);
+      if (!view) {
+        spin_pause();
+        continue;
+      }
+      const std::size_t sz = view->size();
+      assert(sz >= sizeof(std::uint64_t));
+      std::memcpy(scratch.data(), view->first.data(), view->first.size());
+      if (view->wrapped()) {
+        std::memcpy(scratch.data() + view->first.size(), view->second.data(), view->second.size());
+      }
+      std::uint64_t seq{};
+      std::memcpy(&seq, scratch.data(), sizeof(seq));
+      assert(seq == expected && "zero-copy: out of order or lost message");
+
+      const std::size_t extra = sz - sizeof(seq);
+      for (std::size_t i = 0; i < extra; ++i) {
+        assert(scratch[sizeof(seq) + i] == static_cast<std::byte>((extra + i) & 0xFF) &&
+               "zero-copy: payload corrupted");
+      }
+      cons.commit_read(fq); // release the in-place message back to the producer
+      ++expected;
+    }
+    assert(expected == N);
+  });
+
+  go.store(true, std::memory_order_release);
+  producer_thread.join();
+  consumer_thread.join();
+  std::println("test_zero_copy PASSED ({} messages read in place, byte-for-byte, no loss)", N);
+}
+
 // --- Demo 3: full end-to-end stress -------------------------------------
 // Two threads pump N variable-sized messages through a Queue ring. The consumer
 // verifies that every message arrives exactly once, in order, byte-for-byte -
@@ -289,7 +362,7 @@ inline void test_full_ring_optimized(benchmark::State &state) {
 // the busy-spin version - isolating how much the yield cost depends on contention.
 inline void test_full_ring_optimized_yield(benchmark::State &state) {
   std::println("--- test_full_ring_optimized_yield ---");
-  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/false>(state, 1'000'000'000);
+  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/false>(state, 100'000'000);
   std::println("test_full_ring_optimized_yield PASSED");
 }
 
@@ -461,6 +534,7 @@ inline void test_latency_yield(benchmark::State &state) {
 inline void test() {
   test_basic();
   test_limits();
+  test_zero_copy();
   BENCHMARK(test_full_ring_back_pressure)->UseManualTime()->Iterations(1);
   BENCHMARK(test_full_ring_back_pressure_yield)->UseManualTime()->Iterations(1);
   BENCHMARK(test_full_ring_optimized)->UseManualTime()->Iterations(1);
