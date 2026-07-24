@@ -473,6 +473,12 @@ inline void run_latency(benchmark::State &state) {
   std::int64_t max_ns = 0;
   std::uint64_t samples = 0;
 
+  // Every per-message latency, kept so we can sort for tail percentiles after the run.
+  // The mean hides the tail and `max` is a single noisy sample; p99/p99.9 are what
+  // actually characterize HFT latency (you get picked off on your worst cases).
+  std::vector<std::int64_t> all_lat;
+  all_lat.reserve(static_cast<std::size_t>(N) * static_cast<std::size_t>(state.max_iterations));
+
   for (auto _ : state) {
     auto fq_ptr = std::make_unique<fast_queue>();
     fast_queue &fq = *fq_ptr;
@@ -484,6 +490,8 @@ inline void run_latency(benchmark::State &state) {
     std::int64_t c_sum = 0;
     std::int64_t c_min = std::numeric_limits<std::int64_t>::max();
     std::int64_t c_max = 0;
+    std::vector<std::int64_t> c_lat;
+    c_lat.reserve(N);
 
     std::thread consumer_thread([&] {
       std::array<std::byte, MAX_MSG> out{};
@@ -507,6 +515,7 @@ inline void run_latency(benchmark::State &state) {
         c_sum += lat;
         c_min = std::min(c_min, lat);
         c_max = std::max(c_max, lat);
+        c_lat.push_back(lat);
         ++got;
       }
     });
@@ -537,17 +546,39 @@ inline void run_latency(benchmark::State &state) {
     sum_ns += c_sum;
     min_ns = std::min(min_ns, c_min);
     max_ns = std::max(max_ns, c_max);
+    all_lat.insert(all_lat.end(), c_lat.begin(), c_lat.end());
     samples += N;
   }
 
   const double avg_ns =
       samples ? static_cast<double>(sum_ns) / static_cast<double>(samples) : 0.0;
+
+  // Nearest-rank percentiles over the sorted samples: p = value at index ceil(q*n)-1.
+  std::sort(all_lat.begin(), all_lat.end());
+  auto pct = [&all_lat](double q) -> std::int64_t {
+    if (all_lat.empty()) {
+      return 0;
+    }
+    auto idx = static_cast<std::size_t>(q * static_cast<double>(all_lat.size()));
+    if (idx >= all_lat.size()) {
+      idx = all_lat.size() - 1;
+    }
+    return all_lat[idx];
+  };
+  const std::int64_t p50 = pct(0.50);
+  const std::int64_t p99 = pct(0.99);
+  const std::int64_t p999 = pct(0.999);
+
   state.counters["avg_ns"] = avg_ns;
   state.counters["min_ns"] = static_cast<double>(min_ns);
+  state.counters["p50_ns"] = static_cast<double>(p50);
+  state.counters["p99_ns"] = static_cast<double>(p99);
+  state.counters["p99.9_ns"] = static_cast<double>(p999);
   state.counters["max_ns"] = static_cast<double>(max_ns);
 
-  std::println("rate {} msg/s | avg {:.0f} ns | min {} ns | max {} ns | samples {}", rate, avg_ns,
-               min_ns, max_ns, samples);
+  std::println("rate {} msg/s | avg {:.0f} ns | min {} ns | p50 {} ns | p99 {} ns | p99.9 {} ns | "
+               "max {} ns | samples {}",
+               rate, avg_ns, min_ns, p50, p99, p999, max_ns, samples);
 }
 
 // Consumer busy-spins on an empty queue - the HFT production strategy.
