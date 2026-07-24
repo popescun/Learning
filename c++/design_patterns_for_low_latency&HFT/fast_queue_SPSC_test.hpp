@@ -196,7 +196,7 @@ inline void test_zero_copy() {
 // false = std::this_thread::yield() (cooperative, traps into the scheduler).
 // Manual timing brackets only the pump: thread spawn and join are excluded, and
 // so is payload construction (built once, up front).
-template <class Queue, bool BusySpin>
+template <class Queue, bool BusySpin, bool ZeroCopy = false>
 inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
   // The consumer's scratch buffer is sized to the largest possible message, not
   // to the ring: a 1 MiB ring must never land on the consumer's stack.
@@ -291,22 +291,41 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
         pause(); // wait at the gate
       }
       while (expected < N) {
-        auto n = cons.try_read(fq, out);
-        if (!n) {
-          pause();
-          continue;
-        }
-        std::uint64_t seq{};
-        assert(*n >= sizeof(seq));
-        std::memcpy(&seq, out.data(), sizeof(seq));
-        assert(seq == expected && "out of order or lost message");
+        if constexpr (ZeroCopy) {
+          // Zero-copy: consume the message IN the ring, no copy out.
+          auto view = cons.try_read_view(fq);
+          if (!view) {
+            pause();
+            continue;
+          }
+          // Mark the in-place payload as observed so the read path isn't optimised away.
+          // NOTE: this does NOT re-read the payload bytes, so the copy-vs-zero-copy delta is
+          // an UPPER BOUND on the win - it credits zero-copy with the whole eliminated memcpy.
+          benchmark::DoNotOptimize(view->first.data());
+          if (view->wrapped()) {
+            benchmark::DoNotOptimize(view->second.data());
+          }
+          cons.commit_read(fq);
+          ++expected;
+        } else {
+          auto n = cons.try_read(fq, out);
+          if (!n) {
+            pause();
+            continue;
+          }
+          benchmark::DoNotOptimize(out); // keep the payload copy into `out` from being elided
+          std::uint64_t seq{};
+          assert(*n >= sizeof(seq));
+          std::memcpy(&seq, out.data(), sizeof(seq));
+          assert(seq == expected && "out of order or lost message");
 
-        const std::size_t extra = *n - sizeof(seq);
-        for (std::size_t i = 0; i < extra; ++i) {
-          assert(out[sizeof(seq) + i] == static_cast<std::byte>((extra + i) & 0xFF) &&
-                 "payload corrupted");
+          const std::size_t extra = *n - sizeof(seq);
+          for (std::size_t i = 0; i < extra; ++i) {
+            assert(out[sizeof(seq) + i] == static_cast<std::byte>((extra + i) & 0xFF) &&
+                   "payload corrupted");
+          }
+          ++expected;
         }
-        ++expected;
       }
       assert(expected == N);
       t_end = std::chrono::steady_clock::now();
@@ -355,6 +374,17 @@ inline void test_full_ring_optimized(benchmark::State &state) {
   std::println("--- test_full_ring_optimized ---");
   run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/true>(state, 1'000'000'000);
   std::println("test_full_ring_optimized PASSED");
+}
+
+// Same large ring + busy-spin as test_full_ring_optimized, but the consumer reads each
+// message IN PLACE (zero-copy) via try_read_view/commit_read instead of copying it out.
+// Head-to-head with test_full_ring_optimized this isolates the consumer-side payload copy
+// that zero-copy eliminates (same producer, ring, N, and wait strategy).
+inline void test_full_ring_optimized_zero_copy(benchmark::State &state) {
+  std::println("--- test_full_ring_optimized_zero_copy ---");
+  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/true, /*ZeroCopy=*/true>(state,
+                                                                                     1'000'000'000);
+  std::println("test_full_ring_optimized_zero_copy PASSED");
 }
 
 // Same large ring, waiting with std::this_thread::yield(). With almost no
@@ -538,6 +568,7 @@ inline void test() {
   BENCHMARK(test_full_ring_back_pressure)->UseManualTime()->Iterations(1);
   BENCHMARK(test_full_ring_back_pressure_yield)->UseManualTime()->Iterations(1);
   BENCHMARK(test_full_ring_optimized)->UseManualTime()->Iterations(1);
+  BENCHMARK(test_full_ring_optimized_zero_copy)->UseManualTime()->Iterations(1);
   BENCHMARK(test_full_ring_optimized_yield)->UseManualTime()->Iterations(1);
   // Sweep a couple of representative arrival rates (msgs/sec).
   BENCHMARK(test_latency)->UseRealTime()->Iterations(1)->Arg(100'000)->Arg(1'000'000'000);
