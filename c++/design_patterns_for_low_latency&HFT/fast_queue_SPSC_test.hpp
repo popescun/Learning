@@ -331,16 +331,17 @@ inline void run_latency(benchmark::State &state) {
   std::vector<std::int64_t> all_lat;
   all_lat.reserve(static_cast<std::size_t>(N) * static_cast<std::size_t>(state.max_iterations));
 
-  // Same pooled-buffer + in-place-stamp send mechanism as run_full_ring: a power-of-two
-  // pool of reusable buffers, built once outside the timed region so allocation is never
-  // on the hot path. latency_msg is fixed size, so each slot is sizeof(latency_msg) and
-  // is fully (re)stamped on each send - here the whole message is dynamic (seq + a fresh
-  // timestamp), which is the one thing that cannot be pre-built. The pool keeps the way a
-  // message is prepared and sent identical across all benchmarks.
-  constexpr std::uint64_t POOL = 8192;
-  static_assert((POOL & (POOL - 1)) == 0, "POOL must be a power of two");
-  constexpr std::uint64_t POOL_MASK = POOL - 1;
-  std::vector<std::array<std::byte, sizeof(latency_msg)>> pool(POOL);
+  // NOTE: deliberately NO payload pool here (unlike run_full_ring). This benchmark measures
+  // end-to-end DELIVERY LATENCY, not throughput. It sends a modest, fixed N of messages at a
+  // target arrival rate and records each message's transit time (recv - t_send). Two reasons
+  // a pool buys nothing:
+  //   1. N is small - latency percentiles stabilise well below a million samples, so there is
+  //      no huge count to keep allocation off the hot path for (the pool in run_full_ring only
+  //      exists to survive billion-message throughput runs).
+  //   2. Every message must carry a FRESH send timestamp stamped as late as possible, so there
+  //      is nothing static to pre-build or reuse - the whole message is rebuilt each send.
+  // So each message is just built on the stack (to_bytes) and sent. Simpler and clearer for a
+  // latency test.
 
   for (auto _ : state) {
     auto fq_ptr = std::make_unique<fast_queue>();
@@ -394,12 +395,9 @@ inline void run_latency(benchmark::State &state) {
         while (clock::now() < target) {
           spin_pause();
         }
-        // Reuse a pooled buffer and stamp the whole message (seq + timestamp) in place,
-        // as late as possible, then send - the same mechanism the full-ring producer uses.
-        auto &buf = pool[seq & POOL_MASK];
         const latency_msg m{seq, now_ns()}; // stamp send as late as possible
-        std::memcpy(buf.data(), &m, sizeof(m));
-        while (!prod.try_write(fq, std::span<const std::byte>{buf})) {
+        const auto bytes = to_bytes(m);
+        while (!prod.try_write(fq, std::span<const std::byte>{bytes})) {
           spin_pause();
         }
       }
