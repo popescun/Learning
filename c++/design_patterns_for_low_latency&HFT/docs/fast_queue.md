@@ -10,17 +10,51 @@ It carries **variable-sized, length-prefixed messages**, reuses its storage
 synchronizes the two threads with nothing more than two atomic counters and
 acquire/release ordering — no mutexes, no CAS loops.
 
+### Source layout
+
+The implementation and its tests live in **separate headers** so the queue reads
+as a clean, self-contained component:
+
+| File | Contents |
+|------|----------|
+| `fast_queue.hpp` | **Implementation only** — the ring buffer, `producer`, `consumer`, the `ring_write`/`ring_read` helpers, and `spin_pause`. |
+| `fast_queue_test.hpp` | **Tests & benchmarks** — the demos, the `to_bytes`/`from_bytes` serialization helpers, the demo POD types (`Quote`, `latency_msg`), and the `fast_queue::test()` entry point. Reopens `namespace fast_queue`. |
+
+`main.cpp` includes `fast_queue_test.hpp` and calls `fast_queue::test()`.
+
+The ring is **parameterized on its capacity** — `fast_queue_t<Size>` — so the same
+code serves both a tiny 1 KB ring (to force wraps and back-pressure in tests) and
+a 1 MB ring (to measure raw throughput). `fast_queue` is an alias for the default
+small ring; see §1.
+
 ---
 
 ## 1. Data model
 
-```
-struct fast_queue {
+```cpp
+template <std::size_t Size>
+struct fast_queue_t {
+  static_assert((Size & (Size - 1)) == 0, "queue size must be a power of two");
+  static constexpr std::size_t SIZE = Size;
+  static constexpr std::uint64_t MASK = Size - 1;
+
   alignas(CACHE_LINE_SIZE) std::atomic<std::uint64_t> read_counter{0};
   alignas(CACHE_LINE_SIZE) std::atomic<std::uint64_t> write_counter{0};
-  alignas(CACHE_LINE_SIZE) std::array<std::byte, QUEUE_SIZE> buffer{};
+  alignas(CACHE_LINE_SIZE) std::array<std::byte, Size> buffer{};
 };
+
+using fast_queue = fast_queue_t<QUEUE_SIZE>;   // the default small ring
 ```
+
+The ring is a **template on its byte capacity `Size`**, which must be a power of
+two (static-asserted). It publishes the capacity and address mask as
+`static constexpr SIZE` / `MASK` so the helpers, producer, and consumer can be
+written once and work for any size. Two ready-made sizes are used:
+
+| Alias / constant | Size | Used by |
+|------------------|------|---------|
+| `fast_queue` (= `fast_queue_t<QUEUE_SIZE>`) | `QUEUE_SIZE` = **1 KB** | demos + back-pressure benchmark (small ring forces wraps & full/empty collisions) |
+| `fast_queue_t<LARGE_QUEUE_SIZE>` | `LARGE_QUEUE_SIZE` = **1 MB** | "optimized" throughput benchmark (producer/consumer decouple, back-pressure vanishes) |
 
 The whole state is three fields:
 
@@ -234,19 +268,22 @@ Because storage is circular, a record that starts near the end of the buffer can
 that by splitting the copy in (at most) two `memcpy`s:
 
 ```cpp
-inline void ring_write(fast_queue &fq, std::uint64_t counter,
+template <class Q>
+inline void ring_write(Q &fq, std::uint64_t counter,
                        const std::byte *src, std::size_t n) {
-  const auto index = static_cast<std::size_t>(counter & QUEUE_MASK);
-  const std::size_t first = std::min(n, QUEUE_SIZE - index);  // bytes until end
+  const auto index = static_cast<std::size_t>(counter & Q::MASK);
+  const std::size_t first = std::min(n, Q::SIZE - index);     // bytes until end
   std::memcpy(fq.buffer.data() + index, src, first);          // part 1
   if (n > first)                                               // wrapped?
     std::memcpy(fq.buffer.data(), src + first, n - first);    // part 2 @ start
 }
 ```
 
-The helpers take the **absolute counter** (`write_counter` / `read_counter`) and
-mask it down to the physical buffer `index` themselves — the caller passes the
-logical counter, not a pre-wrapped position. `ring_read` is the mirror image
+The helpers are **generic over the queue type `Q`**, taking the capacity and mask
+from `Q::SIZE` / `Q::MASK` so the same code serves the 1 KB and 1 MB rings. They
+take the **absolute counter** (`write_counter` / `read_counter`) and mask it down
+to the physical buffer `index` themselves — the caller passes the logical
+counter, not a pre-wrapped position. `ring_read` is the mirror image
 (buffer → destination). `first` is how many bytes fit before the physical end; if
 `n > first` the remainder wraps to index `0`. When a record fits without
 wrapping, the second `memcpy` is skipped.
@@ -259,12 +296,14 @@ the length prefix itself may straddle the boundary and is handled correctly.
 ## 4. The producer — `try_write`
 
 ```cpp
-bool try_write(fast_queue &fq, std::span<const std::byte> payload);
+template <class Q>
+bool try_write(Q &fq, std::span<const std::byte> payload);
 ```
 
 Returns `true` if the message was written, `false` if the queue was too full to
 hold the whole record (nothing is written in that case — messages are never
-partially enqueued).
+partially enqueued). The method is templated on the queue type `Q`, and the
+free-space check below uses `Q::SIZE` in place of the literal `QUEUE_SIZE`.
 
 The producer keeps two **private** (non-atomic) variables:
 
@@ -341,11 +380,12 @@ the *only* writer of `write_counter`, so its private copy is authoritative).
 ## 5. The consumer — `try_read`
 
 ```cpp
-std::optional<std::size_t> try_read(fast_queue &fq, std::span<std::byte> out);
+template <class Q>
+std::optional<std::size_t> try_read(Q &fq, std::span<std::byte> out);
 ```
 
 Returns the payload length that was copied into `out`, or `std::nullopt` if the
-queue was empty. The consumer keeps its own private mirror:
+queue was empty. Like `try_write`, it is templated on the queue type `Q`. The consumer keeps its own private mirror:
 
 ```cpp
 std::uint64_t read_counter{0};  // its own copy of the tail
@@ -514,9 +554,13 @@ counters (`1000 → 1040`) never wrap; only their masked *indices* do.
 
 ## 8. The test suite (`fast_queue::test()`)
 
-Three demos exercise the implementation end to end:
+All tests and benchmarks live in `fast_queue_test.hpp` (see *Source layout*
+above) and run from `fast_queue::test()`. There are two correctness demos and two
+benchmark families. Throughput benchmarks use [Google Benchmark]; the wait
+strategy is a compile-time flag (`BusySpin`) so each benchmark exists in a
+**busy-spin** and a **yield** variant for direct comparison (see §9).
 
-### `test_basic`
+### `test_basic` — single-message round-trip
 A single `Quote` struct is written and read back, confirming the round-trip and
 that the queue reports empty afterward.
 
@@ -528,29 +572,127 @@ the test asserts precisely `128` were accepted, that the `129th` is **rejected**
 values **in order**. This is the direct proof that counters are checked against
 the limit.
 
-### `test_full_ring` — full concurrent stress, no loss
+### `run_full_ring` — concurrent stress + throughput
 Two threads pump **1,000,000 variable-sized messages** (payloads of 8–44 bytes,
 sizes chosen with `seq % 37` so records wrap at *unaligned* offsets and exercise
 the split-`memcpy` path). Each payload embeds its sequence number plus a
 deterministic filler pattern.
 
-- The **producer** spins on back-pressure — `while (!try_write(...)) yield();` —
-  so it is repeatedly driven into the *full* state (the test prints how many
-  times this happened, typically thousands).
+- The **producer** spins on back-pressure until there is room, so it is
+  repeatedly driven into the *full* state (the benchmark prints how many times).
 - The **consumer** asserts every message arrives with the **expected sequence
   number** (in order, none skipped, none duplicated) and that every filler byte
   matches (byte-for-byte integrity).
 
-Because the 1 MB of traffic flows through a 1 KB ring, the buffer wraps around
-tens of thousands of times. Passing this test demonstrates the three guarantees
-asked for: **complete** delivery, **in-order** delivery, and **no loss**.
+The driver is instantiated **four** ways — two ring sizes × two wait strategies:
 
-Run it via `fast_queue::test()` from `main`. It was verified with a clean
-`-Wall -Wextra` build, all assertions passing, and clean under `-fsanitize=thread`.
+| Benchmark | Ring | Wait strategy |
+|-----------|------|---------------|
+| `test_full_ring_back_pressure` | 1 KB (small) | busy-spin |
+| `test_full_ring_back_pressure_yield` | 1 KB (small) | `std::this_thread::yield()` |
+| `test_full_ring_optimized` | 1 MB (large) | busy-spin |
+| `test_full_ring_optimized_yield` | 1 MB (large) | `std::this_thread::yield()` |
+
+The **small ring** keeps producer and consumer colliding (constantly full/empty),
+isolating back-pressure/contention cost; the 1 MB of traffic through 1 KB wraps
+the buffer tens of thousands of times. The **large ring** lets them decouple so
+full/empty stalls nearly vanish and throughput reflects raw data-movement cost.
+Timing is *manual* and brackets only the pump — thread spawn/join and payload
+construction are excluded.
+
+### `run_latency` — end-to-end delivery latency
+Models an HFT feed: messages arrive at a target **rate** (100 K and 1 M msg/s)
+with real gaps between them — nobody sleeps. The producer **busy-waits on the
+clock** until each message's scheduled send time (like a feed handler polling a
+NIC), stamps it with a publish timestamp, and enqueues it; the consumer stamps
+arrival the instant it dequeues, so `recv - t_send` is true end-to-end latency.
+
+Every per-message sample is kept and, after the run, sorted to report
+**p50 / p99 / p99.9** alongside avg/min/max — because the mean hides the tail and
+`max` is a single noisy sample, while the **tail percentiles are what actually
+characterize HFT latency** (you get picked off on your worst cases, not your
+average). Two variants, `test_latency` (busy-spin) and `test_latency_yield`,
+select the consumer's wait strategy during the idle gaps between messages.
+
+Verified with a clean `-Wall -Wextra` build, all assertions passing, and clean
+under `-fsanitize=thread` (see §6).
+
+[Google Benchmark]: https://github.com/google/benchmark
 
 ---
 
-## 9. Properties at a glance
+## 9. Performance measurement
+
+> **⚠️ Read these as relative comparisons, not absolute specs.** Numbers below are
+> from a **development laptop** (Apple Silicon, 10 cores), **no core pinning**
+> (the run reports *"Failed to set thread affinity"*), under normal background
+> load (load average ≈ 1.8). There is no dedicated/isolated core, no NUMA control,
+> and the OS is free to migrate and deschedule the threads. Absolute latencies —
+> especially the tail — would be markedly lower and more stable on a tuned server
+> with isolated, pinned cores. What *is* meaningful here is the **A/B contrast**
+> between wait strategies and ring sizes, measured on the same machine back to back.
+
+### Throughput — `run_full_ring` (1,000,000 messages/iteration, 10 iterations)
+
+| Benchmark | Ring | Wait | Throughput | Producer hit "full" |
+|-----------|------|------|-----------:|--------------------:|
+| `test_full_ring_back_pressure` | 1 KB | busy-spin | ~48 M msg/s | 676,676 |
+| `test_full_ring_back_pressure_yield` | 1 KB | yield | ~52 M msg/s | 18,432 |
+| `test_full_ring_optimized` | 1 MB | busy-spin | ~64 M msg/s | 1,043,304 |
+| `test_full_ring_optimized_yield` | 1 MB | yield | ~77 M msg/s | 19,640 |
+
+**Interpretation:**
+
+- **Bigger ring → more throughput** (48→64, 52→77 M msg/s). Decoupling the two
+  threads removes back-pressure stalls; throughput moves toward the raw
+  data-movement cost of the queue rather than the cost of waiting on each other.
+- **Under back-pressure, `yield` edges out busy-spin on throughput** (52 vs 48,
+  77 vs 64). This looks backwards until you read the "hit full" column: busy-spin
+  hammers `try_write` hundreds of thousands / a million times while spinning on a
+  full ring, burning a core to *poll* space that isn't there. `yield` deschedules
+  instead, so the consumer gets the core and drains faster — fewer full events by
+  ~35×. When one side is chronically blocked, giving up the core beats spinning.
+- **Throughput is the wrong metric to pick the strategy on**, though — see below.
+
+### Latency — `run_latency` (50 K samples × 3 iterations = 150 K/rate)
+
+| Rate | Strategy | p50 | p99 | p99.9 | max |
+|------|----------|----:|----:|------:|----:|
+| 1 M msg/s | busy-spin | 125 ns | **166 ns** | 8.3 µs | 36 µs |
+| 1 M msg/s | yield | 125 ns | **14.0 µs** | 78 µs | 114 µs |
+| 100 K msg/s | busy-spin | 125 ns | **167 ns** | 7.2 µs | 87 µs |
+| 100 K msg/s | yield | 125 ns | **9.6 µs** | 72 µs | 162 µs |
+
+**Interpretation — this is where busy-spin earns its keep:**
+
+- **The median is identical (125 ns) for both strategies.** Mean and median
+  completely hide the difference — exactly why we report percentiles.
+- **The tail is where they diverge, by ~85×.** Busy-spin holds p99 at ~166 ns;
+  yield's p99 blows up to **9–14 µs**. When the consumer yields during the idle
+  gap between messages, the OS deschedules it, and the *next* message waits for a
+  reschedule — a multi-µs stall that lands squarely in the tail. Busy-spin keeps
+  the consumer hot so it notices the next message within tens of ns.
+- **This is the whole reason HFT burns a core.** You accept lower throughput
+  under contention (previous table) and 100 % CPU on an idle queue in exchange
+  for a tight, predictable tail — because in trading you get picked off on your
+  p99/p99.9, not your average. The two tables together are the trade-off stated
+  numerically: **yield wins throughput-under-contention; busy-spin wins the
+  latency tail — and the tail is what matters.**
+- **`max` is visibly the noisy outlier the percentiles replace** (36–162 µs,
+  jumping around run to run on an unpinned laptop), which is exactly why p99.9 is
+  the honest tail number to quote.
+
+### Reproducing
+
+```
+cmake --build build_release
+./build_release/low_latency                       # runs everything
+./build_release/low_latency --benchmark_filter='test_latency'   # just latency
+```
+
+---
+
+## 10. Properties at a glance
 
 | Property                 | How it's achieved                                             |
 |--------------------------|---------------------------------------------------------------|
@@ -569,6 +711,8 @@ Run it via `fast_queue::test()` from `main`. It was verified with a clean
   producers or consumers would need additional synchronization.
 - A single message must fit in the buffer: `sizeof(header_t) + payload ≤ QUEUE_SIZE`
   (asserted).
-- `QUEUE_SIZE` must be a power of two (static-asserted).
-- Payloads are raw bytes; use `to_bytes` / `from_bytes` (which require trivially
-  copyable types) to (de)serialize structs like `Quote`.
+- The ring `Size` must be a power of two (static-asserted in `fast_queue_t`).
+- Payloads are raw bytes. The queue itself only moves bytes; the `to_bytes` /
+  `from_bytes` helpers (which require trivially copyable types) used to
+  (de)serialize structs like `Quote` are **test-side conveniences** and live in
+  `fast_queue_test.hpp`, not in the implementation header.
