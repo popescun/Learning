@@ -186,10 +186,12 @@ inline void test_zero_copy() {
   std::println("test_zero_copy PASSED ({} messages read in place, byte-for-byte, no loss)", N);
 }
 
-// --- Demo 3: full end-to-end stress -------------------------------------
-// Two threads pump N variable-sized messages through a Queue ring. The consumer
-// verifies that every message arrives exactly once, in order, byte-for-byte -
-// no loss, no duplication, no corruption.
+// --- Demo 3: full-ring throughput benchmark ------------------------------
+// Two threads pump N variable-sized messages through a Queue ring and we measure the
+// queue's raw read/write speed. This is a PERFORMANCE test: the consumer only reads
+// (copy or zero-copy) - it does NOT decode or validate the payload. Content correctness
+// (in-order, byte-for-byte, no loss) is proven separately in test_basic / test_limits /
+// test_zero_copy; here we only assert the count (no lost messages / no deadlock).
 //
 // Shared driver for the full-ring benchmarks below. The BusySpin parameter
 // selects the wait strategy: true = busy-spin (HFT default, burns the core),
@@ -197,7 +199,11 @@ inline void test_zero_copy() {
 // Manual timing brackets only the pump: thread spawn and join are excluded, and
 // so is payload construction (built once, up front).
 template <class Queue, bool BusySpin, bool ZeroCopy = false>
-inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
+inline void run_full_ring(benchmark::State &state) {
+  // Messages to pump per iteration, taken from the benchmark Arg so the count is set at
+  // registration and can be swept with multiple ->Arg()s (same pattern as run_latency).
+  const auto N = static_cast<std::uint64_t>(state.range(0));
+
   // The consumer's scratch buffer is sized to the largest possible message, not
   // to the ring: a 1 MiB ring must never land on the consumer's stack.
   constexpr std::size_t MAX_MSG = 64;
@@ -290,44 +296,34 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
       while (!go.load(std::memory_order_acquire)) {
         pause(); // wait at the gate
       }
+      // We measure the queue's raw read/write speed only - NO decoding or processing of the
+      // payload (that is correctness work, done in test_basic/test_limits/test_zero_copy). The
+      // DoNotOptimize calls just stop the compiler from eliding the read whose cost we want.
       while (expected < N) {
         if constexpr (ZeroCopy) {
-          // Zero-copy: consume the message IN the ring, no copy out.
+          // Zero-copy read: obtain an in-place view of the message, then release it.
           auto view = cons.try_read_view(fq);
           if (!view) {
             pause();
             continue;
           }
-          // Mark the in-place payload as observed so the read path isn't optimised away.
-          // NOTE: this does NOT re-read the payload bytes, so the copy-vs-zero-copy delta is
-          // an UPPER BOUND on the win - it credits zero-copy with the whole eliminated memcpy.
-          benchmark::DoNotOptimize(view->first.data());
-          if (view->wrapped()) {
-            benchmark::DoNotOptimize(view->second.data());
-          }
+          benchmark::DoNotOptimize(view->first);
+          benchmark::DoNotOptimize(view->second);
           cons.commit_read(fq);
           ++expected;
         } else {
+          // Copy read: try_read memcpies the payload into `out`. DoNotOptimize(out) keeps that
+          // copy from being elided (out is otherwise unused) so we actually measure it.
           auto n = cons.try_read(fq, out);
           if (!n) {
             pause();
             continue;
           }
-          benchmark::DoNotOptimize(out); // keep the payload copy into `out` from being elided
-          std::uint64_t seq{};
-          assert(*n >= sizeof(seq));
-          std::memcpy(&seq, out.data(), sizeof(seq));
-          assert(seq == expected && "out of order or lost message");
-
-          const std::size_t extra = *n - sizeof(seq);
-          for (std::size_t i = 0; i < extra; ++i) {
-            assert(out[sizeof(seq) + i] == static_cast<std::byte>((extra + i) & 0xFF) &&
-                   "payload corrupted");
-          }
+          benchmark::DoNotOptimize(out);
           ++expected;
         }
       }
-      assert(expected == N);
+      assert(expected == N); // completion / no-loss-of-count only; content correctness: test_*
       t_end = std::chrono::steady_clock::now();
     });
 
@@ -346,7 +342,7 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
 
   state.SetItemsProcessed(state.iterations() * static_cast<std::int64_t>(N));
 
-  std::println("delivered {} messages/iteration in order, byte-for-byte, no loss", N);
+  std::println("pumped {} messages/iteration (read/write speed only, no payload processing)", N);
   std::println("producer hit a full queue {} times on the last iteration", last_fulls);
 }
 
@@ -354,7 +350,7 @@ inline void run_full_ring(benchmark::State &state, std::uint64_t N) {
 // empty most of the time. This isolates the cost of contention / back-pressure.
 inline void test_full_ring_back_pressure(benchmark::State &state) {
   std::println("--- test_full_ring_back_pressure ---");
-  run_full_ring<fast_queue_t<QUEUE_SIZE>, /*BusySpin=*/true>(state, 1'000'000'000);
+  run_full_ring<fast_queue_t<QUEUE_SIZE>, /*BusySpin=*/true>(state);
   std::println("test_full_ring_back_pressure PASSED");
 }
 
@@ -363,7 +359,7 @@ inline void test_full_ring_back_pressure(benchmark::State &state) {
 // see the cost of trapping into the scheduler under heavy back-pressure.
 inline void test_full_ring_back_pressure_yield(benchmark::State &state) {
   std::println("--- test_full_ring_back_pressure_yield ---");
-  run_full_ring<fast_queue_t<QUEUE_SIZE>, /*BusySpin=*/false>(state, 1'000'000'000);
+  run_full_ring<fast_queue_t<QUEUE_SIZE>, /*BusySpin=*/false>(state);
   std::println("test_full_ring_back_pressure_yield PASSED");
 }
 
@@ -372,7 +368,7 @@ inline void test_full_ring_back_pressure_yield(benchmark::State &state) {
 // data-movement cost.
 inline void test_full_ring_optimized(benchmark::State &state) {
   std::println("--- test_full_ring_optimized ---");
-  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/true>(state, 1'000'000'000);
+  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/true>(state);
   std::println("test_full_ring_optimized PASSED");
 }
 
@@ -382,8 +378,7 @@ inline void test_full_ring_optimized(benchmark::State &state) {
 // that zero-copy eliminates (same producer, ring, N, and wait strategy).
 inline void test_full_ring_optimized_zero_copy(benchmark::State &state) {
   std::println("--- test_full_ring_optimized_zero_copy ---");
-  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/true, /*ZeroCopy=*/true>(state,
-                                                                                     1'000'000'000);
+  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/true, /*ZeroCopy=*/true>(state);
   std::println("test_full_ring_optimized_zero_copy PASSED");
 }
 
@@ -392,7 +387,7 @@ inline void test_full_ring_optimized_zero_copy(benchmark::State &state) {
 // the busy-spin version - isolating how much the yield cost depends on contention.
 inline void test_full_ring_optimized_yield(benchmark::State &state) {
   std::println("--- test_full_ring_optimized_yield ---");
-  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/false>(state, 100'000'000);
+  run_full_ring<fast_queue_t<LARGE_QUEUE_SIZE>, /*BusySpin=*/false>(state);
   std::println("test_full_ring_optimized_yield PASSED");
 }
 
@@ -409,15 +404,14 @@ struct latency_msg { // trivially copyable so to_bytes/from_bytes work
   std::int64_t t_send_ns;
 };
 
-template <bool BusySpin>
-inline void run_latency(benchmark::State &state) {
+template <bool BusySpin> inline void run_latency(benchmark::State &state) {
   const auto rate = static_cast<std::uint64_t>(state.range(0)); // messages / second
   constexpr std::uint64_t N = 50'000;                           // samples per iteration
   constexpr std::size_t MAX_MSG = 64;
 
   using clock = std::chrono::steady_clock;
-  const auto period = std::chrono::nanoseconds(
-      rate == 0 ? 0 : static_cast<std::int64_t>(1'000'000'000ULL / rate));
+  const auto period =
+      std::chrono::nanoseconds(rate == 0 ? 0 : static_cast<std::int64_t>(1'000'000'000ULL / rate));
   auto now_ns = [] {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now().time_since_epoch())
         .count();
@@ -517,8 +511,7 @@ inline void run_latency(benchmark::State &state) {
     samples += N;
   }
 
-  const double avg_ns =
-      samples ? static_cast<double>(sum_ns) / static_cast<double>(samples) : 0.0;
+  const double avg_ns = samples ? static_cast<double>(sum_ns) / static_cast<double>(samples) : 0.0;
 
   // Nearest-rank percentiles over the sorted samples: p = value at index ceil(q*n)-1.
   std::sort(all_lat.begin(), all_lat.end());
@@ -561,21 +554,22 @@ inline void test_latency_yield(benchmark::State &state) {
   run_latency</*BusySpin=*/false>(state);
 }
 
-inline void test() {
+inline void test(int argc, char **argv) {
   test_basic();
   test_limits();
   test_zero_copy();
-  BENCHMARK(test_full_ring_back_pressure)->UseManualTime()->Iterations(1);
-  BENCHMARK(test_full_ring_back_pressure_yield)->UseManualTime()->Iterations(1);
-  BENCHMARK(test_full_ring_optimized)->UseManualTime()->Iterations(1);
-  BENCHMARK(test_full_ring_optimized_zero_copy)->UseManualTime()->Iterations(1);
-  BENCHMARK(test_full_ring_optimized_yield)->UseManualTime()->Iterations(1);
+  // Arg(N) = number of messages to pump per iteration. Add more ->Arg()s to sweep N.
+  BENCHMARK(test_full_ring_back_pressure)->UseManualTime()->Iterations(1)->Arg(1'000'000'000);
+  BENCHMARK(test_full_ring_back_pressure_yield)->UseManualTime()->Iterations(1)->Arg(1'000'000'000);
+  BENCHMARK(test_full_ring_optimized)->UseManualTime()->Iterations(1)->Arg(1'000'000'000);
+  BENCHMARK(test_full_ring_optimized_zero_copy)->UseManualTime()->Iterations(1)->Arg(1'000'000'000);
+  BENCHMARK(test_full_ring_optimized_yield)->UseManualTime()->Iterations(1)->Arg(100'000'000);
   // Sweep a couple of representative arrival rates (msgs/sec).
   BENCHMARK(test_latency)->UseRealTime()->Iterations(1)->Arg(100'000)->Arg(1'000'000'000);
   BENCHMARK(test_latency_yield)->UseRealTime()->Iterations(1)->Arg(100'000)->Arg(1'000'000'000);
 
-  int argc{0};
-  char **argv{nullptr};
+  // Forward the real command-line args so --benchmark_filter / --benchmark_repetitions etc.
+  // actually take effect (previously argv was empty, so the whole suite always ran).
   benchmark::Initialize(&argc, argv);
   benchmark::RunSpecifiedBenchmarks();
   benchmark::Shutdown();

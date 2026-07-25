@@ -13,6 +13,7 @@
 #include <cstring>
 #include <optional>
 #include <span>
+#include <version>
 
 #if defined(__cpp_lib_hardware_interference_size)
 #include <new>
@@ -59,8 +60,7 @@ using header_t = std::int32_t;
  * by offset equality), the whole buffer can be used - there is no wasted slot.
  * The physical position of a counter in the buffer is (counter & QUEUE_MASK).
  */
-template <std::size_t Size>
-struct fast_queue_t {
+template <std::size_t Size> struct fast_queue_t {
   static_assert((Size & (Size - 1)) == 0, "queue size must be a power of two");
   static constexpr std::size_t SIZE = Size;
   static constexpr std::uint64_t MASK = Size - 1;
@@ -115,8 +115,7 @@ struct producer {
    * does not have room for the whole record - this is the limit check that
    * gives us back-pressure and guarantees the consumer never loses data.
    */
-  template <class Q>
-  bool try_write(Q &fq, std::span<const std::byte> payload) {
+  template <class Q> bool try_write(Q &fq, std::span<const std::byte> payload) {
     const auto payload_size = static_cast<header_t>(payload.size());
     const std::size_t record_size = sizeof(header_t) + payload_size;
     assert(record_size <= Q::SIZE && "message larger than the whole queue");
@@ -175,8 +174,7 @@ struct consumer {
    * Try to read one message into `out`. Returns the number of payload bytes
    * read, or std::nullopt when the queue is empty.
    */
-  template <class Q>
-  std::optional<std::size_t> try_read(Q &fq, std::span<std::byte> out) {
+  template <class Q> std::optional<std::size_t> try_read(Q &fq, std::span<std::byte> out) {
     assert(pending_record == 0 && "an uncommitted zero-copy view is still outstanding");
     // Empty check. Use the cached head first, refresh only when it looks empty.
     if (read_counter == write_counter) {
@@ -213,8 +211,7 @@ struct consumer {
    * the end is handled); the payload - the bulk - is exposed in place, saving the ring->out
    * copy that try_read performs.
    */
-  template <class Q>
-  std::optional<read_view> try_read_view(Q &fq) {
+  template <class Q> std::optional<read_view> try_read_view(Q &fq) {
     assert(pending_record == 0 && "previous try_read_view was not committed");
     // Empty check, same cached-first / refresh-on-demand trick as try_read.
     if (read_counter == write_counter) {
@@ -250,8 +247,7 @@ struct consumer {
    * Release the message from the last try_read_view back to the producer: advance the tail
    * and publish. Must be called exactly once after a successful try_read_view().
    */
-  template <class Q>
-  void commit_read(Q &fq) {
+  template <class Q> void commit_read(Q &fq) {
     assert(pending_record != 0 && "commit_read without a matching try_read_view");
     read_counter += pending_record;
     pending_record = 0;

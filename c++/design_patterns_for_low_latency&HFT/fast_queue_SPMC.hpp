@@ -134,8 +134,7 @@ inline void spin_pause() noexcept {
  * Every counter sits on its own cache line. The producer overwrites only up to
  * min(read_counter[*]); until then a slot is still owned by at least one consumer.
  */
-template <std::size_t Size, std::size_t NConsumers>
-struct spmc_queue_t {
+template <std::size_t Size, std::size_t NConsumers> struct spmc_queue_t {
   static_assert((Size & (Size - 1)) == 0, "queue size must be a power of two");
   static_assert(NConsumers >= 1, "need at least one consumer");
   static constexpr std::size_t SIZE = Size;
@@ -180,8 +179,7 @@ struct producer {
    * ring cannot hold the whole record because the SLOWEST consumer has not freed enough
    * space yet — this is the lossless back-pressure gate.
    */
-  template <class Q>
-  bool try_write(Q &fq, std::span<const std::byte> payload) {
+  template <class Q> bool try_write(Q &fq, std::span<const std::byte> payload) {
     const auto payload_size = static_cast<header_t>(payload.size());
     const std::size_t record_size = sizeof(header_t) + payload_size;
     assert(record_size <= Q::SIZE && "message larger than the whole queue");
@@ -212,8 +210,7 @@ struct producer {
   // Scan all N consumer tails and return the minimum (the reuse gate). Each load is
   // acquire so that, before we overwrite a slot, we have observed the slowest consumer
   // actually finishing its read of it.
-  template <class Q>
-  static std::uint64_t load_min_read(const Q &fq) {
+  template <class Q> static std::uint64_t load_min_read(const Q &fq) {
     std::uint64_t m = std::numeric_limits<std::uint64_t>::max();
     for (const auto &rc : fq.read_counter) {
       m = std::min(m, rc.value.load(std::memory_order_acquire));
@@ -221,7 +218,7 @@ struct producer {
     return m;
   }
 
-  std::uint64_t write_counter{0};  // private copy of the head (producer is sole writer)
+  std::uint64_t write_counter{0};   // private copy of the head (producer is sole writer)
   std::uint64_t cached_min_read{0}; // last observed min() of the consumer tails
 };
 
@@ -238,8 +235,7 @@ struct consumer {
    * The read path is essentially the SPSC try_read — the elegance of Option B is that
    * only publishing changes (to this consumer's own counter slot).
    */
-  template <class Q>
-  std::optional<std::size_t> try_read(Q &fq, std::span<std::byte> out) {
+  template <class Q> std::optional<std::size_t> try_read(Q &fq, std::span<std::byte> out) {
     // Empty check for this consumer: cached head first, refresh only when it looks empty.
     if (read_counter == cached_write) {
       cached_write = fq.write_counter.load(std::memory_order_acquire);
@@ -271,9 +267,9 @@ struct consumer {
     return static_cast<std::size_t>(payload_size);
   }
 
-  std::size_t id;                 // which read_counter slot this consumer owns (0..N-1)
-  std::uint64_t read_counter{0};  // this consumer's private tail
-  std::uint64_t cached_write{0};  // last observed head (producer progress)
+  std::size_t id;                // which read_counter slot this consumer owns (0..N-1)
+  std::uint64_t read_counter{0}; // this consumer's private tail
+  std::uint64_t cached_write{0}; // last observed head (producer progress)
 };
 
 } // namespace fast_queue_spmc
