@@ -31,8 +31,7 @@ namespace fast_queue_spsc {
 // modulo.  Keeping it small makes it easy to drive the queue all the way to
 // full and wrap around many times in the tests below.
 constexpr std::size_t QUEUE_SIZE = 1024;
-constexpr std::uint64_t QUEUE_MASK = QUEUE_SIZE - 1;
-static_assert((QUEUE_SIZE & QUEUE_MASK) == 0, "QUEUE_SIZE must be a power of two");
+static_assert((QUEUE_SIZE & (QUEUE_SIZE - 1)) == 0, "QUEUE_SIZE must be a power of two");
 
 // A large ring (1 MiB) for the "optimized" benchmark: big enough that producer
 // and consumer decouple and almost never hit full/empty, so back-pressure
@@ -58,7 +57,7 @@ using header_t = std::int32_t;
  *
  * Because fullness/emptiness are distinguished by the counter *difference* (not
  * by offset equality), the whole buffer can be used - there is no wasted slot.
- * The physical position of a counter in the buffer is (counter & QUEUE_MASK).
+ * The physical position of a counter in the buffer is (counter & MASK).
  */
 template <std::size_t Size> struct fast_queue_t {
   static_assert((Size & (Size - 1)) == 0, "queue size must be a power of two");
