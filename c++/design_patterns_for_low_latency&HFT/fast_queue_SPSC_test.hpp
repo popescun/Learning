@@ -29,7 +29,7 @@
 
 #include <benchmark/benchmark.h>
 
-namespace fast_queue {
+namespace fast_queue_spsc {
 
 template <class T> std::array<std::byte, sizeof(T)> to_bytes(const T &obj) {
   static_assert(std::is_trivially_copyable_v<T>);
@@ -554,7 +554,7 @@ inline void test_latency_yield(benchmark::State &state) {
   run_latency</*BusySpin=*/false>(state);
 }
 
-inline void test(int argc, char **argv) {
+inline void test() {
   test_basic();
   test_limits();
   test_zero_copy();
@@ -567,11 +567,5 @@ inline void test(int argc, char **argv) {
   // Sweep a couple of representative arrival rates (msgs/sec).
   BENCHMARK(test_latency)->UseRealTime()->Iterations(1)->Arg(100'000)->Arg(1'000'000'000);
   BENCHMARK(test_latency_yield)->UseRealTime()->Iterations(1)->Arg(100'000)->Arg(1'000'000'000);
-
-  // Forward the real command-line args so --benchmark_filter / --benchmark_repetitions etc.
-  // actually take effect (previously argv was empty, so the whole suite always ran).
-  benchmark::Initialize(&argc, argv);
-  benchmark::RunSpecifiedBenchmarks();
-  benchmark::Shutdown();
 }
-} // namespace fast_queue
+} // namespace fast_queue_spsc

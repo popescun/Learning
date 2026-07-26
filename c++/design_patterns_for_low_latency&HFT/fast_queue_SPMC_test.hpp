@@ -230,14 +230,37 @@ inline void test_broadcast_optimized_zero_copy(benchmark::State &state) {
   std::println("test_broadcast_optimized_zero_copy PASSED");
 }
 
+// Small ring (1 KB): the slowest of the NC consumers gates the producer through the min()
+// back-pressure gate, so throughput is CONSUMER-bound - unlike the decoupled large-ring
+// "optimized" case above, which is producer/fan-out-bound. This is the regime where a cheaper
+// consumer read (zero-copy) can actually move the broadcast rate. Fewer messages (smaller Arg)
+// because the constant back-pressure makes this much slower per message.
+inline void test_broadcast_back_pressure(benchmark::State &state) {
+  std::println("--- test_broadcast_back_pressure ---");
+  run_broadcast<spmc_queue_t<QUEUE_SIZE, 3>, /*BusySpin=*/true, /*ZeroCopy=*/false>(state);
+  std::println("test_broadcast_back_pressure PASSED");
+}
+
+// Same small ring, but each consumer reads IN PLACE (zero-copy). Head-to-head with the copy
+// variant this shows whether removing the per-consumer copy speeds up the consumer-bound rate.
+inline void test_broadcast_back_pressure_zero_copy(benchmark::State &state) {
+  std::println("--- test_broadcast_back_pressure_zero_copy ---");
+  run_broadcast<spmc_queue_t<QUEUE_SIZE, 3>, /*BusySpin=*/true, /*ZeroCopy=*/true>(state);
+  std::println("test_broadcast_back_pressure_zero_copy PASSED");
+}
+
 // Runs the correctness demo and registers the broadcast benchmarks. The actual
 // benchmark::Initialize/RunSpecifiedBenchmarks/Shutdown is driven once by fast_queue::test()
 // (called after this in main), so these benchmarks run in the same pass as the SPSC ones.
-inline void register_benchmarks() {
+inline void test() {
   test_broadcast_zero_copy();
   // Arg(N) = messages broadcast per iteration. Add more ->Arg()s to sweep N.
+  // Large decoupled ring (producer/fan-out-bound):
   BENCHMARK(test_broadcast_optimized)->UseManualTime()->Iterations(1)->Arg(100'000'000);
   BENCHMARK(test_broadcast_optimized_zero_copy)->UseManualTime()->Iterations(1)->Arg(100'000'000);
+  // Small contended ring (consumer-bound via the min() gate); smaller N since it's slower:
+  BENCHMARK(test_broadcast_back_pressure)->UseManualTime()->Iterations(1)->Arg(10'000'000);
+  BENCHMARK(test_broadcast_back_pressure_zero_copy)->UseManualTime()->Iterations(1)->Arg(10'000'000);
 }
 
 } // namespace fast_queue_spmc

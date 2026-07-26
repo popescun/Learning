@@ -24,7 +24,7 @@ inline constexpr std::size_t CACHE_LINE_SIZE = 128; // Apple Silicon
 inline constexpr std::size_t CACHE_LINE_SIZE = 64; // safe default
 #endif
 
-namespace fast_queue {
+namespace fast_queue_spsc {
 
 // The ring capacity must be a power of two so a monotonically increasing byte
 // counter can be mapped onto a buffer offset with a cheap bit-mask instead of a
