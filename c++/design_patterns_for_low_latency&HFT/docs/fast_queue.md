@@ -151,7 +151,7 @@ counters at all** — which is what this design does.
 The key move is to **separate the two jobs a ring-buffer index performs**:
 
 1. **Decide empty / full** — from the *absolute, never-wrapped* counters.
-2. **Find the physical slot** — with `& QUEUE_MASK`, and *only* here.
+2. **Find the physical slot** — with `& MASK`, and *only* here.
 
 `write_counter` and `read_counter` are monotonically increasing byte totals that
 are **never reduced mod N**. Their true difference therefore lands in `[0, N]` —
@@ -173,7 +173,7 @@ Modulo enters exactly once, and only to answer "*where* in the buffer," never
 "*how full*":
 
 ```
-offset_in_buffer = counter & QUEUE_MASK     // == counter % QUEUE_SIZE
+offset_in_buffer = counter & MASK     // == counter % QUEUE_SIZE
 ```
 
 (see *Mapping a counter to a buffer position — a bit-mask, not a modulo* below).
@@ -189,26 +189,32 @@ trade is clearly the better one.
 ### Mapping a counter to a buffer position — a bit-mask, not a modulo
 
 **The offset is `counter % QUEUE_SIZE`, but we compute it as `counter &
-QUEUE_MASK` — a single-instruction bit-mask instead of an expensive `%`
+MASK` — a single-instruction bit-mask instead of an expensive `%`
 divide.** The two are identical because `QUEUE_SIZE` is a power of two.
 
 ```
-offset_in_buffer = counter & QUEUE_MASK           // == counter % QUEUE_SIZE
-                                                  // QUEUE_MASK = QUEUE_SIZE - 1
+offset_in_buffer = counter & MASK                 // == counter % QUEUE_SIZE
+                                                  // MASK = Size - 1
 ```
 
 Why they're equal: dividing by `2^k` is a shift right by `k`, and the remainder
-is exactly the `k` low bits that get shifted off. `& QUEUE_MASK` keeps precisely
+is exactly the `k` low bits that get shifted off. `& MASK` keeps precisely
 those low bits, so it *is* the modulo — for a power-of-two divisor only.
 
-This is why the equivalence holds only when `QUEUE_SIZE` is a **power of two**,
+This is why the equivalence holds only when the size is a **power of two**,
 which is enforced at compile time (the assert uses the same trick: a power of two
-has one bit set, so `N & (N - 1) == 0`):
+has one bit set, so `N & (N - 1) == 0`). The addressing mask lives on the queue
+template as `MASK = Size - 1`:
 
 ```
 constexpr std::size_t QUEUE_SIZE = 1024;
-constexpr std::uint64_t QUEUE_MASK = QUEUE_SIZE - 1;
-static_assert((QUEUE_SIZE & QUEUE_MASK) == 0, "must be a power of two");
+static_assert((QUEUE_SIZE & (QUEUE_SIZE - 1)) == 0, "QUEUE_SIZE must be a power of two");
+
+template <std::size_t Size> struct fast_queue_t {
+  static_assert((Size & (Size - 1)) == 0, "queue size must be a power of two");
+  static constexpr std::uint64_t MASK = Size - 1;   // applied only for addressing
+  // ...
+};
 ```
 
 ### Cache-line alignment (false-sharing avoidance)
