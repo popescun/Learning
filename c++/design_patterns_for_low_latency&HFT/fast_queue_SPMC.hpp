@@ -340,10 +340,10 @@ struct consumer {
     fq.read_counter[id].value.store(read_counter, std::memory_order_release);
   }
 
-  std::size_t id;                 // which read_counter slot this consumer owns (0..N-1)
-  std::uint64_t read_counter{0};  // this consumer's private tail
-  std::uint64_t cached_write{0};  // last observed head (producer progress)
-  std::size_t pending_record{0};  // size of a peeked-but-not-committed record (0 = none)
+  std::size_t id;                // which read_counter slot this consumer owns (0..N-1)
+  std::uint64_t read_counter{0}; // this consumer's private tail
+  std::uint64_t cached_write{0}; // last observed head (producer progress)
+  std::size_t pending_record{0}; // size of a peeked-but-not-committed record (0 = none)
 };
 
 } // namespace fast_queue_spmc

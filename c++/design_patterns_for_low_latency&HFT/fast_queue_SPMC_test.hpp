@@ -99,8 +99,8 @@ inline void test_broadcast_zero_copy() {
   for (std::size_t c = 0; c < NC; ++c) {
     assert(received[c] == N && "a consumer did not receive every message");
   }
-  std::println("test_broadcast_zero_copy PASSED ({} consumers x {} messages, in order, no loss)", NC,
-               N);
+  std::println("test_broadcast_zero_copy PASSED ({} consumers x {} messages, in order, no loss)",
+               NC, N);
 }
 
 // --- Broadcast throughput benchmark -------------------------------------------------------
@@ -260,7 +260,10 @@ inline void test() {
   BENCHMARK(test_broadcast_optimized_zero_copy)->UseManualTime()->Iterations(1)->Arg(100'000'000);
   // Small contended ring (consumer-bound via the min() gate); smaller N since it's slower:
   BENCHMARK(test_broadcast_back_pressure)->UseManualTime()->Iterations(1)->Arg(10'000'000);
-  BENCHMARK(test_broadcast_back_pressure_zero_copy)->UseManualTime()->Iterations(1)->Arg(10'000'000);
+  BENCHMARK(test_broadcast_back_pressure_zero_copy)
+      ->UseManualTime()
+      ->Iterations(1)
+      ->Arg(10'000'000);
 }
 
 } // namespace fast_queue_spmc

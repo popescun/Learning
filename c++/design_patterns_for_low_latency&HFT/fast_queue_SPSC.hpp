@@ -89,9 +89,15 @@ inline void spin_pause() noexcept {
 template <class Q>
 inline void ring_write(Q &fq, std::uint64_t counter, const std::byte *src, std::size_t n) {
   const auto index = static_cast<std::size_t>(counter & Q::MASK);
-  const std::size_t first = std::min(n, Q::SIZE - index);
-  std::memcpy(fq.buffer.data() + index, src, first);
-  if (n > first) { // the record straddles the end -> continue at the start
+  // Common path: the whole record fits before the physical end, so the copy uses
+  // the FULL (compile-time-constant, at each call site) size `n` — clang folds it
+  // to direct loads/stores. The wrapping split is the rare branch. (Mirrors the
+  // ulang fast_queue restructure for an apples-to-apples comparison.)
+  if (index + n <= Q::SIZE) {
+    std::memcpy(fq.buffer.data() + index, src, n);
+  } else { // the record straddles the end -> split at the physical boundary
+    const std::size_t first = Q::SIZE - index;
+    std::memcpy(fq.buffer.data() + index, src, first);
     std::memcpy(fq.buffer.data(), src + first, n - first);
   }
 }
@@ -101,9 +107,13 @@ inline void ring_write(Q &fq, std::uint64_t counter, const std::byte *src, std::
 template <class Q>
 inline void ring_read(const Q &fq, std::uint64_t counter, std::byte *dst, std::size_t n) {
   const auto index = static_cast<std::size_t>(counter & Q::MASK);
-  const std::size_t first = std::min(n, Q::SIZE - index);
-  std::memcpy(dst, fq.buffer.data() + index, first);
-  if (n > first) {
+  // Common path: constant-size copy (see ring_write) so clang folds it to direct
+  // loads/stores; the wrapping split is the rare branch.
+  if (index + n <= Q::SIZE) {
+    std::memcpy(dst, fq.buffer.data() + index, n);
+  } else {
+    const std::size_t first = Q::SIZE - index;
+    std::memcpy(dst, fq.buffer.data() + index, first);
     std::memcpy(dst + first, fq.buffer.data(), n - first);
   }
 }
@@ -259,4 +269,4 @@ struct consumer {
   std::size_t pending_record{0};  // size of a peeked-but-not-committed record (0 = none)
 };
 
-} // namespace fast_queue
+} // namespace fast_queue_spsc
