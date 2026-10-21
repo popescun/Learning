@@ -6,6 +6,7 @@
 #include "test_dome.hpp"
 #include "test_alignas.hpp"
 #include "eurocontrol.hpp"
+#include "modules.hpp"
 
 int main () {
   // alternative_tokens::test();
@@ -14,6 +15,7 @@ int main () {
   // break_shared_ptr_cycle::test();
   // test_dome::test();
   // test_alignas::test();
-  eurocontrol::test();
+  // eurocontrol::test();
+  modules::test();
   return 0;
 }
